@@ -21,6 +21,13 @@ git --git-dir=.git-local --work-tree=. status
 git --git-dir=.git-local --work-tree=. log --oneline --decorate --graph --all
 ```
 
+也可以使用项目内包装脚本：
+
+```bash
+scripts/git-local status
+scripts/git-local log --oneline --decorate --graph --all
+```
+
 如果后续环境允许使用标准 `.git`，可以迁移为普通 Git 仓库。
 
 ## 本地配置

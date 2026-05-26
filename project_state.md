@@ -160,6 +160,13 @@ git --git-dir=.git-local --work-tree=. status
 git --git-dir=.git-local --work-tree=. log --oneline --decorate --graph --all
 ```
 
+也可以使用包装脚本：
+
+```bash
+scripts/git-local status
+scripts/git-local log --oneline --decorate --graph --all
+```
+
 本地 Git 用户配置：
 
 - `user.email`: `shendan_sd@126.com`
