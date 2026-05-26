@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "letsquant"
+version = "0.1.0"
+description = "A-share mid/short-term quant research, backtesting, and manual trade signal system."
+readme = "README.md"
+requires-python = ">=3.8"
+authors = [{ name = "letsquant" }]
+dependencies = []
+
+[project.optional-dependencies]
+tushare = ["tushare>=1.4.0"]
+dev = ["pytest>=7.0"]
+
+[project.scripts]
+letsquant = "letsquant.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

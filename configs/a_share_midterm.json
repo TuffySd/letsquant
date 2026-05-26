@@ -1,0 +1,40 @@
+{
+  "initial_cash": 100000,
+  "data": {
+    "source": "csv",
+    "data_dir": "data/daily",
+    "symbols": [],
+    "start_date": "2018-01-01",
+    "end_date": null
+  },
+  "strategy": {
+    "name": "trend_breakout",
+    "params": {
+      "short_window": 20,
+      "mid_window": 60,
+      "long_window": 120,
+      "breakout_window": 55,
+      "momentum_window": 60,
+      "min_momentum": 0.05,
+      "volume_window": 20,
+      "min_volume_ratio": 1.0,
+      "stop_loss_pct": 0.08,
+      "trailing_stop_pct": 0.15,
+      "max_holding_days": 90
+    }
+  },
+  "risk": {
+    "max_position_pct": 0.2,
+    "max_positions": 5,
+    "cash_reserve_pct": 0.08,
+    "lot_size": 100
+  },
+  "costs": {
+    "commission_rate": 0.0003,
+    "min_commission": 5,
+    "stamp_tax_rate": 0.0005,
+    "transfer_fee_rate": 0.00001,
+    "slippage_bps": 5
+  },
+  "output_dir": "results"
+}
