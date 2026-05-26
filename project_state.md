@@ -172,6 +172,15 @@ scripts/git-local log --oneline --decorate --graph --all
 - `user.email`: `shendan_sd@126.com`
 - `user.name`: `shendan_sd`
 
+远程仓库：
+
+- `origin`: `git@github.com:TuffySd/letsquant.git`
+
+当前环境 SSH 设置：
+
+- SSH key 路径：`~/.ssh/id_ed25519_github`
+- Git 本地配置：`core.sshCommand = ssh -i ~/.ssh/id_ed25519_github -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new`
+
 安全要求：
 
 - 不允许把 GitHub 密码、token、SSH 私钥或其他凭据写入 `docs/`、`project_state.md`、配置文件或提交历史。
@@ -297,6 +306,13 @@ git --git-dir=.git-local --work-tree=. checkout -b milestone/<date>-<topic>
 - 提交所有相关变更
 - 合并回 `main`
 - 如果远程仓库已配置，推送 `main` 和里程碑分支
+
+当前远程推送命令：
+
+```bash
+scripts/git-local push -u origin main
+scripts/git-local push -u origin milestone/<date>-<topic>
+```
 
 ### P1：真实市场约束
 

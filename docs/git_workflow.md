@@ -63,11 +63,21 @@ git --git-dir=.git-local --work-tree=. config user.name shendan_sd
 
 不要使用账号密码配置 HTTPS 远程。推荐二选一：
 
+当前远程仓库：
+
+- `origin`: `git@github.com:TuffySd/letsquant.git`
+
+当前环境本地 SSH 配置使用：
+
+- SSH key: `~/.ssh/id_ed25519_github`
+- Git config: `core.sshCommand = ssh -i ~/.ssh/id_ed25519_github -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new`
+
 ### SSH
 
 ```bash
-git --git-dir=.git-local --work-tree=. remote add origin git@github.com:<github-user>/<repo>.git
-git --git-dir=.git-local --work-tree=. push -u origin main
+scripts/git-local remote add origin git@github.com:TuffySd/letsquant.git
+scripts/git-local config core.sshCommand "ssh -i ~/.ssh/id_ed25519_github -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
+scripts/git-local push -u origin main
 ```
 
 ### GitHub CLI
@@ -75,7 +85,7 @@ git --git-dir=.git-local --work-tree=. push -u origin main
 ```bash
 gh auth login
 gh repo create letsquant --private --source=. --remote=origin
-git --git-dir=.git-local --work-tree=. push -u origin main
+scripts/git-local push -u origin main
 ```
 
 如果使用 Personal Access Token，只能放在系统 credential manager、环境变量或交互式凭据管理中，不写入项目文件。
@@ -94,6 +104,13 @@ make compile
 ```bash
 make backtest
 make signal
+```
+
+推送当前稳定主线和里程碑分支：
+
+```bash
+scripts/git-local push -u origin main
+scripts/git-local push -u origin milestone/<date>-<topic>
 ```
 
 提交信息格式建议：
