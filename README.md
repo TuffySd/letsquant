@@ -19,6 +19,25 @@ PYTHONPATH=src python -m letsquant.cli signal --config configs/sample_backtest.j
 PYTHONPATH=src python -m letsquant.cli signal --config configs/sample_backtest.json --portfolio configs/live_portfolio.example.json
 ```
 
+同步 Tushare 日线到本地 CSV 缓存：
+
+```bash
+pip install '.[tushare]'
+export TUSHARE_TOKEN=你的_tushare_token
+PYTHONPATH=src python -m letsquant.cli data sync \
+  --provider tushare \
+  --symbols 000001.SZ,000002.SZ \
+  --start-date 2020-01-01 \
+  --end-date 2024-12-31 \
+  --cache-dir data/daily
+```
+
+也可以用配置文件补齐 `data_dir`、`symbols` 和日期范围：
+
+```bash
+PYTHONPATH=src python -m letsquant.cli data sync --config configs/a_share_midterm.json --symbols 000001.SZ
+```
+
 回测结果默认输出到 `results/`：
 
 - `metrics.json`：收益、回撤、夏普、交易次数等指标。
@@ -86,3 +105,9 @@ PYTHONPATH=src python -m letsquant.cli signal --config configs/sample_backtest.j
 5. 建立每日收盘后自动任务，输出人工交易清单。
 
 更多细节见 `docs/strategy_playbook.md` 和 `docs/data_providers.md`。
+
+## 当前需要准备的资源
+
+- Tushare Pro token：用于自动同步真实 A 股日线数据。token 只通过 `TUSHARE_TOKEN` 环境变量传入，不要写入配置文件或仓库。
+- Tushare 权限/积分：至少需要覆盖日线行情接口；后续还会需要复权因子、股票基础信息、停复牌、涨跌停和指数行情。
+- Redis：当前阶段不需要。日线级中短期研究先用本地 CSV 缓存，等引入 Web 服务、任务队列或并发数据抓取后再评估。

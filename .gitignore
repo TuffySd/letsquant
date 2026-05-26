@@ -13,3 +13,4 @@ build/
 .git-local/
 results/
 data/cache/
+data/daily/

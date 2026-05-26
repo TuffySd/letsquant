@@ -12,6 +12,25 @@
 
 官方文档：https://tushare.pro/document/2
 
+当前已支持同步日线 CSV：
+
+```bash
+pip install '.[tushare]'
+export TUSHARE_TOKEN=你的_tushare_token
+PYTHONPATH=src python -m letsquant.cli data sync \
+  --provider tushare \
+  --symbols 000001.SZ,000002.SZ \
+  --start-date 2020-01-01 \
+  --end-date 2024-12-31 \
+  --cache-dir data/daily
+```
+
+配置约定：
+
+- token 通过 `TUSHARE_TOKEN` 环境变量读取，不写入配置文件。
+- 输出仍是每只股票一个 CSV，字段兼容当前 `CsvBarSource`。
+- `--config` 可复用配置文件中的 `data_dir`、`symbols`、`start_date` 和 `end_date`。
+
 需要的数据：
 
 - 日线行情：open、high、low、close、vol、amount。
@@ -44,3 +63,9 @@
 - 可通过 Python API 自动拉取并缓存。
 
 有了这些，策略验证质量会显著高于只用裸 K 线。
+
+## 暂不需要的基础设施
+
+- Redis：当前是日线级研究和收盘后人工交易信号，本地 CSV 缓存更容易审计，也足够支撑下一阶段验证。
+- 数据库：股票池扩大后可以再引入 SQLite/PostgreSQL；在复权、停复牌、涨跌停等字段稳定前，先不要过早增加存储复杂度。
+- 任务队列：每日收盘后同步可以先用手工命令或 cron，等流程稳定后再评估 Celery/RQ 等。
