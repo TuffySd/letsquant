@@ -1,13 +1,14 @@
 import argparse
 import json
 import os
+import sys
 from datetime import date
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from letsquant.config import AppConfig, load_config, parse_date
 from letsquant.data import CsvBarSource
-from letsquant.data.tushare_source import TushareDailySource
+from letsquant.data.tushare_source import TushareDailySource, default_probe_cases
 from letsquant.execution import Backtester
 from letsquant.execution.instructions import build_manual_orders
 from letsquant.models import Action, Bar, Position, Signal
@@ -48,17 +49,55 @@ def main() -> None:
         default="TUSHARE_TOKEN",
         help="environment variable containing the Tushare token",
     )
+    sync_parser.add_argument(
+        "--api-url-env",
+        default="TUSHARE_API_URL",
+        help="optional environment variable containing a Tushare-compatible API URL",
+    )
+    sync_parser.add_argument(
+        "--request-interval",
+        type=float,
+        default=0.5,
+        help="seconds between provider requests; 0.5 respects 120 requests/minute",
+    )
+    probe_parser = data_subparsers.add_parser("probe", help="probe Tushare token permissions")
+    probe_parser.add_argument("--provider", choices=["tushare"], default="tushare")
+    probe_parser.add_argument("--symbol", default="000001.SZ", help="sample A-share symbol")
+    probe_parser.add_argument("--trade-date", default="2024-01-02", help="sample trade date")
+    probe_parser.add_argument("--news-source", default="sina", help="sample news source, e.g. sina or cls")
+    probe_parser.add_argument(
+        "--token-env",
+        default="TUSHARE_TOKEN",
+        help="environment variable containing the Tushare token",
+    )
+    probe_parser.add_argument(
+        "--api-url-env",
+        default="TUSHARE_API_URL",
+        help="optional environment variable containing a Tushare-compatible API URL",
+    )
+    probe_parser.add_argument(
+        "--request-interval",
+        type=float,
+        default=0.5,
+        help="seconds between provider requests; 0.5 respects 120 requests/minute",
+    )
 
     args = parser.parse_args()
 
-    if args.command == "backtest":
-        config = load_config(args.config)
-        run_backtest(config)
-    elif args.command == "signal":
-        config = load_config(args.config)
-        run_signal(config, args.portfolio)
-    elif args.command == "data" and args.data_command == "sync":
-        run_data_sync(args)
+    try:
+        if args.command == "backtest":
+            config = load_config(args.config)
+            run_backtest(config)
+        elif args.command == "signal":
+            config = load_config(args.config)
+            run_signal(config, args.portfolio)
+        elif args.command == "data" and args.data_command == "sync":
+            run_data_sync(args)
+        elif args.command == "data" and args.data_command == "probe":
+            run_data_probe(args)
+    except (ValueError, RuntimeError) as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        raise SystemExit(2) from exc
 
 
 def run_backtest(config: AppConfig) -> None:
@@ -150,17 +189,59 @@ def run_data_sync(args: argparse.Namespace) -> None:
     if not token:
         raise ValueError(f"missing Tushare token; set environment variable {args.token_env}")
 
-    source = TushareDailySource(token=token, cache_dir=cache_dir)
+    api_url = _optional_env(args.api_url_env)
+    source = TushareDailySource(
+        token=token,
+        cache_dir=cache_dir,
+        api_url=api_url,
+        request_interval=args.request_interval,
+    )
     result = source.sync_daily_csv(symbols, start_date, end_date)
     print(
         "Data sync complete. "
         f"provider={args.provider} cache_dir={cache_dir} "
+        f"api_url={'custom' if api_url else 'default'} "
+        f"request_interval={args.request_interval:.2f}s "
         f"requested={len(symbols)} written={len(result.written)} empty={len(result.empty_symbols)}"
     )
     for path in result.written:
         print(path)
     if result.empty_symbols:
         print("Empty symbols: " + ",".join(result.empty_symbols))
+
+
+def run_data_probe(args: argparse.Namespace) -> None:
+    if args.provider != "tushare":
+        raise ValueError(f"unsupported data provider: {args.provider}")
+    token = os.environ.get(args.token_env, "").strip()
+    if not token:
+        raise ValueError(f"missing Tushare token; set environment variable {args.token_env}")
+
+    trade_date = parse_date(args.trade_date)
+    if trade_date is None:
+        raise ValueError("trade-date is required")
+    api_url = _optional_env(args.api_url_env)
+    source = TushareDailySource(
+        token=token,
+        cache_dir=Path("data/daily"),
+        api_url=api_url,
+        request_interval=args.request_interval,
+    )
+    cases = default_probe_cases(args.symbol, trade_date, args.news_source)
+    results = source.probe_permissions(cases)
+
+    print(
+        "Tushare probe complete. "
+        f"api_url={'custom' if api_url else 'default'} "
+        f"request_interval={args.request_interval:.2f}s "
+        f"cases={len(results)} ok={sum(1 for item in results if item.ok)} "
+        f"failed={sum(1 for item in results if not item.ok)}"
+    )
+    for item in results:
+        status = "OK" if item.ok else "FAIL"
+        columns = ",".join(item.columns[:6])
+        detail = f"rows={item.rows} columns={columns}" if item.ok else _compact_error(item.error)
+        print(f"{status} {item.method} {item.name} [{item.required_for}] {detail}")
 
 
 def _resolve_start_date(start_date_arg: Optional[str], config: Optional[AppConfig]) -> date:
@@ -214,6 +295,18 @@ def _dedupe_symbols(symbols: List[str]) -> List[str]:
         seen.add(symbol)
         deduped.append(symbol)
     return deduped
+
+
+def _optional_env(name: str) -> Optional[str]:
+    value = os.environ.get(name, "").strip()
+    return value or None
+
+
+def _compact_error(error: str) -> str:
+    text = " ".join(error.split())
+    if len(text) > 180:
+        return text[:177] + "..."
+    return text
 
 
 def load_portfolio(

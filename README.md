@@ -19,11 +19,28 @@ PYTHONPATH=src python -m letsquant.cli signal --config configs/sample_backtest.j
 PYTHONPATH=src python -m letsquant.cli signal --config configs/sample_backtest.json --portfolio configs/live_portfolio.example.json
 ```
 
+## 开发环境
+
+建议使用项目内 conda 环境，避免把 Tushare、pandas 等依赖安装到宿主 Python：
+
+```bash
+.miniforge/micromamba create -y -p .conda/envs/letsquant -f environment.yml
+make PYTHON=.conda/envs/letsquant/bin/python test
+```
+
+当前环境约定：
+
+- Python：3.10。
+- 本地环境目录：`.conda/envs/letsquant`，不进入 Git。
+- token 只通过环境变量传入，不写入配置或仓库。
+
 同步 Tushare 日线到本地 CSV 缓存：
 
 ```bash
 pip install '.[tushare]'
 export TUSHARE_TOKEN=你的_tushare_token
+export TUSHARE_API_URL=https://tt.xiaodefa.cn  # 仅代理 token 需要
+PYTHONPATH=src python -m letsquant.cli data probe --trade-date 2024-01-02
 PYTHONPATH=src python -m letsquant.cli data sync \
   --provider tushare \
   --symbols 000001.SZ,000002.SZ \

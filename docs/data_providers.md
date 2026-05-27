@@ -17,6 +17,8 @@
 ```bash
 pip install '.[tushare]'
 export TUSHARE_TOKEN=你的_tushare_token
+export TUSHARE_API_URL=https://tt.xiaodefa.cn  # 仅 Tushare 代理 token 需要
+PYTHONPATH=src python -m letsquant.cli data probe --trade-date 2024-01-02
 PYTHONPATH=src python -m letsquant.cli data sync \
   --provider tushare \
   --symbols 000001.SZ,000002.SZ \
@@ -28,6 +30,9 @@ PYTHONPATH=src python -m letsquant.cli data sync \
 配置约定：
 
 - token 通过 `TUSHARE_TOKEN` 环境变量读取，不写入配置文件。
+- 如果使用兼容 Tushare SDK 的代理 token，通过 `TUSHARE_API_URL` 注入代理地址。
+- `data probe` 会探测日线、复权因子、涨跌停、停复牌、指数、新闻和公告等关键接口权限。
+- 默认 `--request-interval 0.5`，对应 120 次/分钟，避免代理 token 触发冷却。
 - 输出仍是每只股票一个 CSV，字段兼容当前 `CsvBarSource`。
 - `--config` 可复用配置文件中的 `data_dir`、`symbols`、`start_date` 和 `end_date`。
 

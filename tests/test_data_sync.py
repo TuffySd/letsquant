@@ -6,13 +6,17 @@ from pathlib import Path
 from typing import Dict, List
 
 from letsquant.cli import _resolve_symbols, _split_symbols
-from letsquant.data.tushare_source import TushareDailySource
+from letsquant.data.tushare_source import TushareDailySource, TushareProbeCase
 
 
 class FakeFrame:
     def __init__(self, rows: List[Dict[str, object]]) -> None:
         self.rows = rows
         self.empty = not rows
+        self.columns = list(rows[0]) if rows else []
+
+    def __len__(self) -> int:
+        return len(self.rows)
 
     def sort_values(self, column: str) -> "FakeFrame":
         return FakeFrame(sorted(self.rows, key=lambda row: row[column]))
@@ -65,6 +69,13 @@ class FakeTushareClient:
             ]
         )
 
+    def stock_basic(self, **params: str) -> FakeFrame:
+        self.calls.append({"method": "stock_basic", **params})
+        return FakeFrame([{"ts_code": "000001.SZ", "name": "sample"}])
+
+    def broken_api(self, **params: str) -> FakeFrame:
+        raise RuntimeError("permission denied")
+
 
 class DataSyncTests(unittest.TestCase):
     def test_tushare_source_writes_sorted_daily_csv(self) -> None:
@@ -90,6 +101,46 @@ class DataSyncTests(unittest.TestCase):
                 rows = list(csv.DictReader(fh))
             self.assertEqual([row["trade_date"] for row in rows], ["20240102", "20240103"])
             self.assertEqual(rows[0]["ts_code"], "000001.SZ")
+
+    def test_tushare_source_sets_custom_api_url_and_rate_limits(self) -> None:
+        client = FakeTushareClient()
+        sleep_calls: List[float] = []
+        with tempfile.TemporaryDirectory() as temp_dir:
+            source = TushareDailySource(
+                token="test-token",
+                cache_dir=Path(temp_dir),
+                api_url="https://example.test",
+                request_interval=0.5,
+                pro_client=client,
+                sleeper=sleep_calls.append,
+            )
+            source.sync_daily_csv(["000001.SZ", "000002.SZ"], date(2024, 1, 1), date(2024, 1, 31))
+
+            self.assertEqual(getattr(client, "_DataApi__http_url"), "https://example.test")
+            self.assertEqual(len(client.calls), 2)
+            self.assertEqual(len(sleep_calls), 1)
+            self.assertGreater(sleep_calls[0], 0)
+
+    def test_permission_probe_reports_success_and_failure(self) -> None:
+        client = FakeTushareClient()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            source = TushareDailySource(
+                token="test-token",
+                cache_dir=Path(temp_dir),
+                pro_client=client,
+            )
+            results = source.probe_permissions(
+                [
+                    TushareProbeCase("股票基础信息", "stock_basic", {}, "股票池"),
+                    TushareProbeCase("失败接口", "broken_api", {}, "权限探测"),
+                ]
+            )
+
+            self.assertTrue(results[0].ok)
+            self.assertEqual(results[0].rows, 1)
+            self.assertEqual(results[0].columns, ["ts_code", "name"])
+            self.assertFalse(results[1].ok)
+            self.assertIn("permission denied", results[1].error)
 
     def test_symbol_parsing_dedupes_inputs(self) -> None:
         self.assertEqual(_split_symbols("000001.SZ, 000002.SZ\n# comment"), ["000001.SZ", "000002.SZ"])
