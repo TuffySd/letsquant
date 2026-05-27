@@ -17,4 +17,9 @@ build/
 results/
 data/cache/
 data/daily/
+data/adj_factor/
+data/limits/
+data/suspensions/
+data/stocks/
+data/index_daily/
 tushare积分权限表.xlsx

@@ -46,7 +46,11 @@ PYTHONPATH=src python -m letsquant.cli data sync \
   --symbols 000001.SZ,000002.SZ \
   --start-date 2020-01-01 \
   --end-date 2024-12-31 \
-  --cache-dir data/daily
+  --cache-dir data/daily \
+  --with-adj-factor \
+  --with-constraints \
+  --with-stock-basic \
+  --index-symbols 000300.SH,000905.SH
 ```
 
 也可以用配置文件补齐 `data_dir`、`symbols` 和日期范围：
@@ -64,6 +68,15 @@ PYTHONPATH=src python -m letsquant.cli data sync --config configs/a_share_midter
 - `equity_curve.csv`：每日权益曲线。
 - `current_signals.csv`：当前最新收盘后的待确认人工指令。
 - `manual_orders.csv`：包含建议股数和参考价格的人工下单清单。
+
+Tushare 扩展缓存目录：
+
+- `data/daily/`：日线行情；启用 `--with-constraints` 后会合并 `is_suspended`、`limit_up`、`limit_down`。
+- `data/adj_factor/`：复权因子。
+- `data/limits/`：按交易日缓存涨跌停价格。
+- `data/suspensions/`：按交易日缓存停复牌信息。
+- `data/stocks/`：股票基础信息。
+- `data/index_daily/`：指数日线行情。
 
 ## 数据格式
 

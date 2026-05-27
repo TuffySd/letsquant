@@ -46,6 +46,25 @@ def main() -> None:
     sync_parser.add_argument("--end-date", help="inclusive end date, defaults to today")
     sync_parser.add_argument("--cache-dir", help="output CSV cache directory, defaults to config data_dir")
     sync_parser.add_argument(
+        "--with-adj-factor",
+        action="store_true",
+        help="also cache Tushare adj_factor data under data/adj_factor",
+    )
+    sync_parser.add_argument(
+        "--with-constraints",
+        action="store_true",
+        help="also cache and merge stk_limit/suspend_d constraints into daily CSV",
+    )
+    sync_parser.add_argument(
+        "--with-stock-basic",
+        action="store_true",
+        help="also cache listed stock metadata under data/stocks",
+    )
+    sync_parser.add_argument(
+        "--index-symbols",
+        help="comma-separated index symbols to cache under data/index_daily, e.g. 000300.SH,000905.SH",
+    )
+    sync_parser.add_argument(
         "--token-env",
         default="TUSHARE_TOKEN",
         help="environment variable containing the Tushare token",
@@ -198,18 +217,40 @@ def run_data_sync(args: argparse.Namespace) -> None:
         api_url=api_url,
         request_interval=args.request_interval,
     )
-    result = source.sync_daily_csv(symbols, start_date, end_date)
+    index_symbols = _split_symbols(args.index_symbols) if args.index_symbols else []
+    result = source.sync_market_data_csv(
+        symbols,
+        start_date,
+        end_date,
+        include_adj_factor=args.with_adj_factor,
+        include_constraints=args.with_constraints,
+        include_stock_basic=args.with_stock_basic,
+        index_symbols=index_symbols,
+    )
     print(
         "Data sync complete. "
         f"provider={args.provider} cache_dir={cache_dir} "
         f"api_url={'custom' if api_url else 'default'} "
         f"request_interval={args.request_interval:.2f}s "
-        f"requested={len(symbols)} written={len(result.written)} empty={len(result.empty_symbols)}"
+        f"requested={len(symbols)} written={len(result.daily.written)} empty={len(result.daily.empty_symbols)} "
+        f"adj_factor={len(result.adj_factor)} limits={len(result.limit)} "
+        f"suspensions={len(result.suspension)} index_daily={len(result.index_daily)} "
+        f"stock_basic={1 if result.stock_basic else 0}"
     )
-    for path in result.written:
+    for path in result.daily.written:
         print(path)
-    if result.empty_symbols:
-        print("Empty symbols: " + ",".join(result.empty_symbols))
+    for path in result.adj_factor:
+        print(path)
+    for path in result.limit:
+        print(path)
+    for path in result.suspension:
+        print(path)
+    if result.stock_basic:
+        print(result.stock_basic)
+    for path in result.index_daily:
+        print(path)
+    if result.daily.empty_symbols:
+        print("Empty symbols: " + ",".join(result.daily.empty_symbols))
 
 
 def run_data_probe(args: argparse.Namespace) -> None:

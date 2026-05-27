@@ -1,14 +1,25 @@
-from dataclasses import dataclass
+import csv
+from dataclasses import dataclass, field
 from datetime import date
 import time
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 
 @dataclass(frozen=True)
 class DailyDownloadResult:
     written: List[Path]
     empty_symbols: List[str]
+
+
+@dataclass(frozen=True)
+class MarketDataSyncResult:
+    daily: DailyDownloadResult
+    adj_factor: List[Path]
+    limit: List[Path]
+    suspension: List[Path]
+    stock_basic: Optional[Path] = None
+    index_daily: List[Path] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -81,14 +92,47 @@ class TushareDailySource:
         end = end_date.strftime("%Y%m%d")
         for symbol in symbols:
             df = self._call_pro("daily", ts_code=symbol, start_date=start, end_date=end)
-            if df is None or df.empty:
+            rows = self._frame_rows(df)
+            if not rows:
                 empty_symbols.append(symbol)
                 continue
-            df = df.sort_values("trade_date")
+            rows = sorted(rows, key=lambda row: str(row["trade_date"]))
             path = self.cache_dir / f"{symbol}.csv"
-            df.to_csv(path, index=False)
+            self._write_rows(path, rows)
             written.append(path)
         return DailyDownloadResult(written=written, empty_symbols=empty_symbols)
+
+    def sync_market_data_csv(
+        self,
+        symbols: Iterable[str],
+        start_date: date,
+        end_date: date,
+        include_adj_factor: bool = False,
+        include_constraints: bool = False,
+        include_stock_basic: bool = False,
+        index_symbols: Optional[Iterable[str]] = None,
+    ) -> MarketDataSyncResult:
+        symbol_list = list(symbols)
+        start = start_date.strftime("%Y%m%d")
+        end = end_date.strftime("%Y%m%d")
+
+        constraints = ConstraintCache.empty()
+        if include_constraints:
+            trade_dates = self._collect_daily_trade_dates(symbol_list, start, end)
+            constraints = self._sync_constraints_csv(trade_dates, set(symbol_list))
+
+        daily = self._sync_daily_rows(symbol_list, start, end, constraints)
+        adj_factor = self._sync_adj_factor_csv(symbol_list, start, end) if include_adj_factor else []
+        stock_basic = self._sync_stock_basic_csv() if include_stock_basic else None
+        index_daily = self._sync_index_daily_csv(index_symbols or [], start, end)
+        return MarketDataSyncResult(
+            daily=daily,
+            adj_factor=adj_factor,
+            limit=constraints.limit_paths,
+            suspension=constraints.suspension_paths,
+            stock_basic=stock_basic,
+            index_daily=index_daily,
+        )
 
     def probe_permissions(self, cases: Iterable[TushareProbeCase]) -> List[TushareProbeResult]:
         results: List[TushareProbeResult] = []
@@ -123,7 +167,114 @@ class TushareDailySource:
 
     def _call_pro(self, method: str, **params: Any) -> Any:
         self._wait_for_rate_limit()
-        return getattr(self.pro, method)(**params)
+        try:
+            return getattr(self.pro, method)(**params)
+        except Exception as exc:
+            raise RuntimeError(f"Tushare {method} request failed: {exc}") from exc
+
+    def _sync_daily_rows(
+        self,
+        symbols: Iterable[str],
+        start: str,
+        end: str,
+        constraints: "ConstraintCache",
+    ) -> DailyDownloadResult:
+        written: List[Path] = []
+        empty_symbols: List[str] = []
+        for symbol in symbols:
+            rows = self._frame_rows(self._call_pro("daily", ts_code=symbol, start_date=start, end_date=end))
+            if not rows:
+                empty_symbols.append(symbol)
+                continue
+            rows = sorted(rows, key=lambda row: str(row["trade_date"]))
+            if constraints.has_data:
+                rows = [constraints.enrich_daily_row(row) for row in rows]
+            path = self.cache_dir / f"{symbol}.csv"
+            self._write_rows(path, rows)
+            written.append(path)
+        return DailyDownloadResult(written=written, empty_symbols=empty_symbols)
+
+    def _collect_daily_trade_dates(self, symbols: Iterable[str], start: str, end: str) -> List[str]:
+        dates: Set[str] = set()
+        for symbol in symbols:
+            rows = self._frame_rows(self._call_pro("daily", ts_code=symbol, start_date=start, end_date=end))
+            for row in rows:
+                value = row.get("trade_date")
+                if value:
+                    dates.add(str(value))
+        return sorted(dates)
+
+    def _sync_adj_factor_csv(self, symbols: Iterable[str], start: str, end: str) -> List[Path]:
+        out_dir = self.cache_dir.parent / "adj_factor"
+        written: List[Path] = []
+        for symbol in symbols:
+            rows = self._frame_rows(self._call_pro("adj_factor", ts_code=symbol, start_date=start, end_date=end))
+            if not rows:
+                continue
+            rows = sorted(rows, key=lambda row: str(row["trade_date"]))
+            path = out_dir / f"{symbol}.csv"
+            self._write_rows(path, rows)
+            written.append(path)
+        return written
+
+    def _sync_constraints_csv(self, trade_dates: Iterable[str], symbols: Set[str]) -> "ConstraintCache":
+        limit_rows: List[Dict[str, Any]] = []
+        suspension_rows: List[Dict[str, Any]] = []
+        limit_paths: List[Path] = []
+        suspension_paths: List[Path] = []
+
+        limit_dir = self.cache_dir.parent / "limits"
+        suspension_dir = self.cache_dir.parent / "suspensions"
+        for trade_date in trade_dates:
+            day_limit_rows = self._filter_symbol_rows(
+                self._frame_rows(self._call_pro("stk_limit", trade_date=trade_date)),
+                symbols,
+            )
+            if day_limit_rows:
+                path = limit_dir / f"{trade_date}.csv"
+                self._write_rows(path, sorted(day_limit_rows, key=lambda row: str(row.get("ts_code", ""))))
+                limit_paths.append(path)
+                limit_rows.extend(day_limit_rows)
+
+            day_suspension_rows = self._filter_symbol_rows(
+                self._frame_rows(self._call_pro("suspend_d", trade_date=trade_date)),
+                symbols,
+            )
+            if day_suspension_rows:
+                path = suspension_dir / f"{trade_date}.csv"
+                self._write_rows(path, sorted(day_suspension_rows, key=lambda row: str(row.get("ts_code", ""))))
+                suspension_paths.append(path)
+                suspension_rows.extend(day_suspension_rows)
+
+        return ConstraintCache.from_rows(limit_rows, suspension_rows, limit_paths, suspension_paths)
+
+    def _sync_stock_basic_csv(self) -> Optional[Path]:
+        rows = self._frame_rows(
+            self._call_pro(
+                "stock_basic",
+                exchange="",
+                list_status="L",
+                fields="ts_code,symbol,name,area,industry,list_date",
+            )
+        )
+        if not rows:
+            return None
+        path = self.cache_dir.parent / "stocks" / "stock_basic.csv"
+        self._write_rows(path, sorted(rows, key=lambda row: str(row.get("ts_code", ""))))
+        return path
+
+    def _sync_index_daily_csv(self, index_symbols: Iterable[str], start: str, end: str) -> List[Path]:
+        out_dir = self.cache_dir.parent / "index_daily"
+        written: List[Path] = []
+        for symbol in index_symbols:
+            rows = self._frame_rows(self._call_pro("index_daily", ts_code=symbol, start_date=start, end_date=end))
+            if not rows:
+                continue
+            rows = sorted(rows, key=lambda row: str(row["trade_date"]))
+            path = out_dir / f"{symbol}.csv"
+            self._write_rows(path, rows)
+            written.append(path)
+        return written
 
     def _wait_for_rate_limit(self) -> None:
         if self.request_interval <= 0:
@@ -150,6 +301,89 @@ class TushareDailySource:
     @staticmethod
     def _set_api_url(pro: Any, api_url: str) -> None:
         setattr(pro, "_DataApi__http_url", api_url)
+
+    @staticmethod
+    def _frame_rows(df: Any) -> List[Dict[str, Any]]:
+        if df is None:
+            return []
+        if hasattr(df, "empty") and df.empty:
+            return []
+        if hasattr(df, "to_dict"):
+            return [dict(row) for row in df.to_dict("records")]
+        if hasattr(df, "rows"):
+            return [dict(row) for row in df.rows]
+        raise TypeError(f"unsupported dataframe type: {type(df).__name__}")
+
+    @staticmethod
+    def _filter_symbol_rows(rows: Iterable[Dict[str, Any]], symbols: Set[str]) -> List[Dict[str, Any]]:
+        return [row for row in rows if str(row.get("ts_code", "")) in symbols]
+
+    @staticmethod
+    def _write_rows(path: Path, rows: List[Dict[str, Any]]) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fieldnames: List[str] = []
+        for row in rows:
+            for key in row:
+                if key not in fieldnames:
+                    fieldnames.append(key)
+        with path.open("w", encoding="utf-8", newline="") as fh:
+            writer = csv.DictWriter(fh, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(rows)
+
+
+@dataclass(frozen=True)
+class ConstraintCache:
+    limits: Dict[Tuple[str, str], Dict[str, Any]]
+    suspensions: Set[Tuple[str, str]]
+    limit_paths: List[Path]
+    suspension_paths: List[Path]
+
+    @property
+    def has_data(self) -> bool:
+        return bool(self.limits or self.suspensions)
+
+    def enrich_daily_row(self, row: Dict[str, Any]) -> Dict[str, Any]:
+        enriched = dict(row)
+        key = (str(row.get("ts_code", "")), str(row.get("trade_date", "")))
+        limit = self.limits.get(key, {})
+        enriched["limit_up"] = limit.get("up_limit", limit.get("limit_up", ""))
+        enriched["limit_down"] = limit.get("down_limit", limit.get("limit_down", ""))
+        enriched["is_suspended"] = 1 if key in self.suspensions else 0
+        return enriched
+
+    @classmethod
+    def empty(cls) -> "ConstraintCache":
+        return cls(limits={}, suspensions=set(), limit_paths=[], suspension_paths=[])
+
+    @classmethod
+    def from_rows(
+        cls,
+        limit_rows: Iterable[Dict[str, Any]],
+        suspension_rows: Iterable[Dict[str, Any]],
+        limit_paths: List[Path],
+        suspension_paths: List[Path],
+    ) -> "ConstraintCache":
+        limits: Dict[Tuple[str, str], Dict[str, Any]] = {}
+        for row in limit_rows:
+            trade_date = row.get("trade_date")
+            symbol = row.get("ts_code")
+            if trade_date and symbol:
+                limits[(str(symbol), str(trade_date))] = dict(row)
+
+        suspensions: Set[Tuple[str, str]] = set()
+        for row in suspension_rows:
+            symbol = row.get("ts_code")
+            trade_date = row.get("trade_date") or row.get("suspend_date")
+            if symbol and trade_date:
+                suspensions.add((str(symbol), str(trade_date)))
+
+        return cls(
+            limits=limits,
+            suspensions=suspensions,
+            limit_paths=limit_paths,
+            suspension_paths=suspension_paths,
+        )
 
 
 def default_probe_cases(symbol: str, trade_date: date, news_source: str = "sina") -> List[TushareProbeCase]:

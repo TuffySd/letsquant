@@ -72,7 +72,49 @@ class FakeTushareClient:
 
     def stock_basic(self, **params: str) -> FakeFrame:
         self.calls.append({"method": "stock_basic", **params})
-        return FakeFrame([{"ts_code": "000001.SZ", "name": "sample"}])
+        return FakeFrame([{"ts_code": "000001.SZ", "symbol": "000001", "name": "sample"}])
+
+    def adj_factor(self, ts_code: str, start_date: str, end_date: str) -> FakeFrame:
+        self.calls.append(
+            {
+                "method": "adj_factor",
+                "ts_code": ts_code,
+                "start_date": start_date,
+                "end_date": end_date,
+            }
+        )
+        return FakeFrame(
+            [
+                {"ts_code": ts_code, "trade_date": "20240102", "adj_factor": 1.1},
+                {"ts_code": ts_code, "trade_date": "20240103", "adj_factor": 1.2},
+            ]
+        )
+
+    def stk_limit(self, trade_date: str) -> FakeFrame:
+        self.calls.append({"method": "stk_limit", "trade_date": trade_date})
+        return FakeFrame(
+            [
+                {"ts_code": "000001.SZ", "trade_date": trade_date, "up_limit": 11.0, "down_limit": 9.0},
+                {"ts_code": "000999.SZ", "trade_date": trade_date, "up_limit": 22.0, "down_limit": 18.0},
+            ]
+        )
+
+    def suspend_d(self, trade_date: str) -> FakeFrame:
+        self.calls.append({"method": "suspend_d", "trade_date": trade_date})
+        if trade_date != "20240103":
+            return FakeFrame([])
+        return FakeFrame([{"ts_code": "000001.SZ", "suspend_date": trade_date, "suspend_timing": "全天停牌"}])
+
+    def index_daily(self, ts_code: str, start_date: str, end_date: str) -> FakeFrame:
+        self.calls.append(
+            {
+                "method": "index_daily",
+                "ts_code": ts_code,
+                "start_date": start_date,
+                "end_date": end_date,
+            }
+        )
+        return FakeFrame([{"ts_code": ts_code, "trade_date": "20240102", "close": 3000.0}])
 
     def broken_api(self, **params: str) -> FakeFrame:
         raise RuntimeError("permission denied")
@@ -139,7 +181,7 @@ class DataSyncTests(unittest.TestCase):
 
             self.assertTrue(results[0].ok)
             self.assertEqual(results[0].rows, 1)
-            self.assertEqual(results[0].columns, ["ts_code", "name"])
+            self.assertEqual(results[0].columns, ["ts_code", "symbol", "name"])
             self.assertFalse(results[1].ok)
             self.assertIn("permission denied", results[1].error)
 
@@ -161,6 +203,38 @@ class DataSyncTests(unittest.TestCase):
             self.assertTrue(bars["000001.SZ"][0].is_suspended)
             self.assertEqual(bars["000001.SZ"][0].limit_up, 11)
             self.assertEqual(bars["000001.SZ"][0].limit_down, 9)
+
+    def test_market_data_sync_caches_extras_and_enriches_daily(self) -> None:
+        client = FakeTushareClient()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            source = TushareDailySource(
+                token="test-token",
+                cache_dir=Path(temp_dir) / "daily",
+                pro_client=client,
+            )
+            result = source.sync_market_data_csv(
+                ["000001.SZ"],
+                date(2024, 1, 2),
+                date(2024, 1, 3),
+                include_adj_factor=True,
+                include_constraints=True,
+                include_stock_basic=True,
+                index_symbols=["000300.SH"],
+            )
+
+            self.assertEqual(len(result.daily.written), 1)
+            self.assertEqual(len(result.adj_factor), 1)
+            self.assertEqual(len(result.limit), 2)
+            self.assertEqual(len(result.suspension), 1)
+            self.assertIsNotNone(result.stock_basic)
+            self.assertEqual(len(result.index_daily), 1)
+
+            with result.daily.written[0].open("r", encoding="utf-8", newline="") as fh:
+                daily_rows = list(csv.DictReader(fh))
+            self.assertEqual(daily_rows[0]["limit_up"], "11.0")
+            self.assertEqual(daily_rows[0]["limit_down"], "9.0")
+            self.assertEqual(daily_rows[0]["is_suspended"], "0")
+            self.assertEqual(daily_rows[1]["is_suspended"], "1")
 
 
 if __name__ == "__main__":
