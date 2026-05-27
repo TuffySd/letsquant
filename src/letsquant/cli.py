@@ -8,6 +8,7 @@ from typing import Dict, List, Optional, Tuple
 
 from letsquant.config import AppConfig, load_config, parse_date
 from letsquant.data import CsvBarSource
+from letsquant.data.adjusted_price import build_adjusted_daily_csv
 from letsquant.data.tushare_source import TushareDailySource, default_probe_cases
 from letsquant.execution import Backtester
 from letsquant.execution.instructions import build_manual_orders
@@ -101,6 +102,19 @@ def main() -> None:
         default=0.5,
         help="seconds between provider requests; 0.5 respects 120 requests/minute",
     )
+    adjust_parser = data_subparsers.add_parser("adjust", help="build adjusted daily CSV from cached data")
+    adjust_parser.add_argument("--config", help="optional app config for symbols and data_dir")
+    adjust_parser.add_argument("--symbols", help="comma-separated symbols, e.g. 000001.SZ,000002.SZ")
+    adjust_parser.add_argument("--symbols-file", help="file with symbols separated by lines or commas")
+    adjust_parser.add_argument("--daily-dir", help="raw daily CSV directory, defaults to config data_dir")
+    adjust_parser.add_argument("--adj-factor-dir", default="data/adj_factor", help="adj_factor CSV directory")
+    adjust_parser.add_argument(
+        "--mode",
+        choices=["qfq", "hfq"],
+        default="qfq",
+        help="qfq for forward-adjusted prices, hfq for backward-adjusted prices",
+    )
+    adjust_parser.add_argument("--output-dir", help="output directory, defaults to data/<mode>_daily")
 
     args = parser.parse_args()
 
@@ -115,6 +129,8 @@ def main() -> None:
             run_data_sync(args)
         elif args.command == "data" and args.data_command == "probe":
             run_data_probe(args)
+        elif args.command == "data" and args.data_command == "adjust":
+            run_data_adjust(args)
     except (ValueError, RuntimeError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         raise SystemExit(2) from exc
@@ -285,6 +301,35 @@ def run_data_probe(args: argparse.Namespace) -> None:
         columns = ",".join(item.columns[:6])
         detail = f"rows={item.rows} columns={columns}" if item.ok else _compact_error(item.error)
         print(f"{status} {item.method} {item.name} [{item.required_for}] {detail}")
+
+
+def run_data_adjust(args: argparse.Namespace) -> None:
+    config = load_config(args.config) if args.config else None
+    symbols = _resolve_symbols(args.symbols, args.symbols_file, config)
+    daily_dir = Path(args.daily_dir) if args.daily_dir else None
+    if daily_dir is None and config is not None:
+        daily_dir = config.data.data_dir
+    if daily_dir is None:
+        daily_dir = Path("data/daily")
+    output_dir = Path(args.output_dir) if args.output_dir else Path(f"data/{args.mode}_daily")
+
+    result = build_adjusted_daily_csv(
+        symbols=symbols,
+        daily_dir=daily_dir,
+        adj_factor_dir=Path(args.adj_factor_dir),
+        output_dir=output_dir,
+        mode=args.mode,
+    )
+    print(
+        "Adjusted daily build complete. "
+        f"mode={args.mode} daily_dir={daily_dir} adj_factor_dir={args.adj_factor_dir} "
+        f"output_dir={output_dir} requested={len(symbols)} "
+        f"written={len(result.written)} skipped={len(result.skipped_symbols)}"
+    )
+    for path in result.written:
+        print(path)
+    if result.skipped_symbols:
+        print("Skipped symbols: " + ",".join(result.skipped_symbols))
 
 
 def _resolve_start_date(start_date_arg: Optional[str], config: Optional[AppConfig]) -> date:

@@ -22,4 +22,6 @@ data/limits/
 data/suspensions/
 data/stocks/
 data/index_daily/
+data/qfq_daily/
+data/hfq_daily/
 tushare积分权限表.xlsx

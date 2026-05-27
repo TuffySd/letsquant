@@ -59,6 +59,17 @@ PYTHONPATH=src python -m letsquant.cli data sync \
 PYTHONPATH=src python -m letsquant.cli data sync --config configs/a_share_midterm.json --symbols 000001.SZ
 ```
 
+生成前复权或后复权日线：
+
+```bash
+PYTHONPATH=src python -m letsquant.cli data adjust \
+  --symbols 000001.SZ,000002.SZ \
+  --daily-dir data/daily \
+  --adj-factor-dir data/adj_factor \
+  --mode qfq \
+  --output-dir data/qfq_daily
+```
+
 回测结果默认输出到 `results/`：
 
 - `metrics.json`：收益、回撤、夏普、交易次数等指标。
@@ -77,6 +88,8 @@ Tushare 扩展缓存目录：
 - `data/suspensions/`：按交易日缓存停复牌信息。
 - `data/stocks/`：股票基础信息。
 - `data/index_daily/`：指数日线行情。
+- `data/qfq_daily/`：前复权日线行情，可作为回测 `data_dir`。
+- `data/hfq_daily/`：后复权日线行情。
 
 ## 数据格式
 
