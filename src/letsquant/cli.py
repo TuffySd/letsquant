@@ -2,6 +2,7 @@ import argparse
 import json
 import os
 import sys
+from dataclasses import replace
 from datetime import date
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -37,10 +38,12 @@ def main() -> None:
 
     backtest_parser = subparsers.add_parser("backtest", help="run historical backtest")
     backtest_parser.add_argument("--config", required=True, help="path to JSON config")
+    add_data_override_args(backtest_parser)
 
     signal_parser = subparsers.add_parser("signal", help="generate latest manual trade signals")
     signal_parser.add_argument("--config", required=True, help="path to JSON config")
     signal_parser.add_argument("--portfolio", help="optional live portfolio JSON")
+    add_data_override_args(signal_parser)
 
     data_parser = subparsers.add_parser("data", help="data maintenance commands")
     data_subparsers = data_parser.add_subparsers(dest="data_command", required=True)
@@ -140,9 +143,11 @@ def main() -> None:
     try:
         if args.command == "backtest":
             config = load_config(args.config)
+            config = apply_data_overrides(config, args)
             run_backtest(config)
         elif args.command == "signal":
             config = load_config(args.config)
+            config = apply_data_overrides(config, args)
             run_signal(config, args.portfolio)
         elif args.command == "data" and args.data_command == "sync":
             run_data_sync(args)
@@ -222,6 +227,34 @@ def load_bars(config: AppConfig) -> Dict[str, List[Bar]]:
     if not bars_by_symbol:
         raise ValueError("no market data loaded")
     return bars_by_symbol
+
+
+def add_data_override_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--symbols", help="comma-separated symbols overriding config.data.symbols")
+    parser.add_argument("--symbols-file", help="file with symbols separated by lines, commas, or ts_code CSV column")
+    parser.add_argument("--data-dir", help="CSV data directory overriding config.data.data_dir")
+    parser.add_argument("--start-date", help="inclusive start date overriding config.data.start_date")
+    parser.add_argument("--end-date", help="inclusive end date overriding config.data.end_date")
+    parser.add_argument("--output-dir", help="output directory overriding config output_dir")
+
+
+def apply_data_overrides(config: AppConfig, args: argparse.Namespace) -> AppConfig:
+    symbols = _resolve_optional_symbols(getattr(args, "symbols", None), getattr(args, "symbols_file", None))
+    data = config.data
+    if symbols is not None:
+        data = replace(data, symbols=symbols)
+    data_dir = getattr(args, "data_dir", None)
+    if data_dir:
+        data = replace(data, data_dir=Path(data_dir))
+    start_date = parse_date(getattr(args, "start_date", None))
+    if start_date is not None:
+        data = replace(data, start_date=start_date)
+    end_date = parse_date(getattr(args, "end_date", None))
+    if end_date is not None:
+        data = replace(data, end_date=end_date)
+
+    output_dir = Path(args.output_dir) if getattr(args, "output_dir", None) else config.output_dir
+    return replace(config, data=data, output_dir=output_dir)
 
 
 def run_data_sync(args: argparse.Namespace) -> None:
@@ -412,6 +445,17 @@ def _resolve_symbols(
     if not symbols:
         raise ValueError("symbols are required; use --symbols, --symbols-file, or config.data.symbols")
     return symbols
+
+
+def _resolve_optional_symbols(symbols_arg: Optional[str], symbols_file: Optional[str]) -> Optional[List[str]]:
+    symbols: List[str] = []
+    if symbols_arg:
+        symbols.extend(_split_symbols(symbols_arg))
+    if symbols_file:
+        symbols.extend(_read_symbols_file(Path(symbols_file)))
+    if not symbols:
+        return None
+    return _dedupe_symbols(symbols)
 
 
 def _read_symbols_file(path: Path) -> List[str]:

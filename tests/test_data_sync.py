@@ -5,7 +5,8 @@ from datetime import date
 from pathlib import Path
 from typing import Dict, List
 
-from letsquant.cli import _read_symbols_file, _resolve_symbols, _split_symbols
+from letsquant.cli import _read_symbols_file, _resolve_symbols, _split_symbols, apply_data_overrides
+from letsquant.config import AppConfig, CostConfig, DataConfig, RiskConfig, StrategyConfig
 from letsquant.data.csv_source import CsvBarSource
 from letsquant.data.tushare_source import TushareDailySource, TushareProbeCase
 
@@ -201,6 +202,39 @@ class DataSyncTests(unittest.TestCase):
             )
 
             self.assertEqual(_read_symbols_file(path), ["000001.SZ", "600000.SH"])
+
+    def test_apply_data_overrides_replaces_config_values(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            symbols_file = Path(temp_dir) / "universe.csv"
+            symbols_file.write_text("ts_code,name\n000001.SZ,平安银行\n", encoding="utf-8")
+            args = type(
+                "Args",
+                (),
+                {
+                    "symbols": "600000.SH",
+                    "symbols_file": str(symbols_file),
+                    "data_dir": "data/qfq_daily",
+                    "start_date": "2024-01-02",
+                    "end_date": "2024-12-31",
+                    "output_dir": "results/real",
+                },
+            )()
+            config = AppConfig(
+                initial_cash=100000,
+                data=DataConfig(source="csv", data_dir=Path("data/sample"), symbols=["000002.SZ"]),
+                strategy=StrategyConfig(name="trend_breakout"),
+                risk=RiskConfig(),
+                costs=CostConfig(),
+                output_dir=Path("results"),
+            )
+
+            updated = apply_data_overrides(config, args)
+
+            self.assertEqual(updated.data.symbols, ["600000.SH", "000001.SZ"])
+            self.assertEqual(updated.data.data_dir, Path("data/qfq_daily"))
+            self.assertEqual(updated.data.start_date.isoformat(), "2024-01-02")
+            self.assertEqual(updated.data.end_date.isoformat(), "2024-12-31")
+            self.assertEqual(updated.output_dir, Path("results/real"))
 
     def test_csv_source_reads_trading_constraints(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

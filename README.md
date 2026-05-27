@@ -85,6 +85,23 @@ PYTHONPATH=src python -m letsquant.cli data universe \
 
 生成后的 `data/universe/default.csv` 可以直接作为 `data sync --symbols-file` 输入。
 
+用股票池和复权行情直接覆盖配置运行：
+
+```bash
+PYTHONPATH=src python -m letsquant.cli backtest \
+  --config configs/a_share_midterm.json \
+  --symbols-file data/universe/default.csv \
+  --data-dir data/qfq_daily \
+  --output-dir results/real_backtest
+
+PYTHONPATH=src python -m letsquant.cli signal \
+  --config configs/a_share_midterm.json \
+  --symbols-file data/universe/default.csv \
+  --data-dir data/qfq_daily \
+  --portfolio configs/live_portfolio.example.json \
+  --output-dir results/real_signal
+```
+
 回测结果默认输出到 `results/`：
 
 - `metrics.json`：收益、回撤、夏普、交易次数等指标。
