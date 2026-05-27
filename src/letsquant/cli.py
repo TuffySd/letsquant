@@ -10,6 +10,12 @@ from letsquant.config import AppConfig, load_config, parse_date
 from letsquant.data import CsvBarSource
 from letsquant.data.adjusted_price import build_adjusted_daily_csv
 from letsquant.data.tushare_source import TushareDailySource, default_probe_cases
+from letsquant.data.universe import (
+    UniverseFilters,
+    build_universe_csv,
+    parse_csv_set,
+    parse_exchange_set,
+)
 from letsquant.execution import Backtester
 from letsquant.execution.instructions import build_manual_orders
 from letsquant.models import Action, Bar, Position, Signal
@@ -115,6 +121,16 @@ def main() -> None:
         help="qfq for forward-adjusted prices, hfq for backward-adjusted prices",
     )
     adjust_parser.add_argument("--output-dir", help="output directory, defaults to data/<mode>_daily")
+    universe_parser = data_subparsers.add_parser("universe", help="build a stock universe from stock_basic CSV")
+    universe_parser.add_argument("--stock-basic", default="data/stocks/stock_basic.csv", help="stock_basic CSV path")
+    universe_parser.add_argument("--output", default="data/universe/default.csv", help="output universe CSV path")
+    universe_parser.add_argument("--as-of-date", help="filter date, YYYY-MM-DD or YYYYMMDD; defaults to today")
+    universe_parser.add_argument("--min-listed-days", type=int, default=180, help="minimum listed calendar days")
+    universe_parser.add_argument("--exchanges", default="SH,SZ", help="allowed exchanges, e.g. SH,SZ,BJ")
+    universe_parser.add_argument("--include-bj", action="store_true", help="include Beijing Stock Exchange listings")
+    universe_parser.add_argument("--include-st", action="store_true", help="include ST and *ST names")
+    universe_parser.add_argument("--include-industries", help="comma-separated industries to keep")
+    universe_parser.add_argument("--exclude-industries", help="comma-separated industries to remove")
 
     args = parser.parse_args()
 
@@ -131,6 +147,8 @@ def main() -> None:
             run_data_probe(args)
         elif args.command == "data" and args.data_command == "adjust":
             run_data_adjust(args)
+        elif args.command == "data" and args.data_command == "universe":
+            run_data_universe(args)
     except (ValueError, RuntimeError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         raise SystemExit(2) from exc
@@ -332,6 +350,34 @@ def run_data_adjust(args: argparse.Namespace) -> None:
         print("Skipped symbols: " + ",".join(result.skipped_symbols))
 
 
+def run_data_universe(args: argparse.Namespace) -> None:
+    as_of_date = parse_date(args.as_of_date) if args.as_of_date else date.today()
+    if as_of_date is None:
+        raise ValueError("as-of-date is required")
+    if args.min_listed_days < 0:
+        raise ValueError("min-listed-days cannot be negative")
+    filters = UniverseFilters(
+        as_of_date=as_of_date,
+        min_listed_days=args.min_listed_days,
+        exchanges=parse_exchange_set(args.exchanges),
+        exclude_bj=not args.include_bj,
+        exclude_st=not args.include_st,
+        include_industries=parse_csv_set(args.include_industries),
+        exclude_industries=parse_csv_set(args.exclude_industries),
+    )
+    result = build_universe_csv(
+        stock_basic_path=Path(args.stock_basic),
+        output_path=Path(args.output),
+        filters=filters,
+    )
+    print(
+        "Universe build complete. "
+        f"stock_basic={args.stock_basic} output={result.path} as_of_date={as_of_date.isoformat()} "
+        f"selected={len(result.symbols)} excluded={result.excluded_count}"
+    )
+    print(result.path)
+
+
 def _resolve_start_date(start_date_arg: Optional[str], config: Optional[AppConfig]) -> date:
     parsed = parse_date(start_date_arg) if start_date_arg else None
     if parsed is not None:
@@ -361,7 +407,26 @@ def _resolve_symbols(
 
 def _read_symbols_file(path: Path) -> List[str]:
     with path.open("r", encoding="utf-8") as fh:
-        return _split_symbols(fh.read())
+        text = fh.read()
+    lines = [line for line in text.splitlines() if line.strip()]
+    if lines and "," in lines[0]:
+        header = [item.strip() for item in lines[0].split(",")]
+        symbol_column = _symbol_column_index(header)
+        if symbol_column is not None:
+            symbols = []
+            for line in lines[1:]:
+                columns = [item.strip() for item in line.split(",")]
+                if symbol_column < len(columns) and columns[symbol_column]:
+                    symbols.append(columns[symbol_column])
+            return symbols
+    return _split_symbols(text)
+
+
+def _symbol_column_index(header: List[str]) -> Optional[int]:
+    for name in ("ts_code", "symbol"):
+        if name in header:
+            return header.index(name)
+    return None
 
 
 def _split_symbols(text: str) -> List[str]:

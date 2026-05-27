@@ -70,6 +70,18 @@ PYTHONPATH=src python -m letsquant.cli data adjust \
   --output-dir data/qfq_daily
 ```
 
+生成股票池文件：
+
+```bash
+PYTHONPATH=src python -m letsquant.cli data universe \
+  --stock-basic data/stocks/stock_basic.csv \
+  --output data/universe/default.csv \
+  --as-of-date 2024-01-05 \
+  --min-listed-days 180
+```
+
+生成后的 `data/universe/default.csv` 可以直接作为 `data sync --symbols-file` 输入。
+
 回测结果默认输出到 `results/`：
 
 - `metrics.json`：收益、回撤、夏普、交易次数等指标。
@@ -90,6 +102,7 @@ Tushare 扩展缓存目录：
 - `data/index_daily/`：指数日线行情。
 - `data/qfq_daily/`：前复权日线行情，可作为回测 `data_dir`。
 - `data/hfq_daily/`：后复权日线行情。
+- `data/universe/`：股票池 CSV，支持作为批量同步输入。
 
 ## 数据格式
 

@@ -5,7 +5,7 @@ from datetime import date
 from pathlib import Path
 from typing import Dict, List
 
-from letsquant.cli import _resolve_symbols, _split_symbols
+from letsquant.cli import _read_symbols_file, _resolve_symbols, _split_symbols
 from letsquant.data.csv_source import CsvBarSource
 from letsquant.data.tushare_source import TushareDailySource, TushareProbeCase
 
@@ -189,6 +189,18 @@ class DataSyncTests(unittest.TestCase):
         self.assertEqual(_split_symbols("000001.SZ, 000002.SZ\n# comment"), ["000001.SZ", "000002.SZ"])
         symbols = _resolve_symbols("000001.SZ,000001.SZ", None, None)
         self.assertEqual(symbols, ["000001.SZ"])
+
+    def test_symbols_file_reads_ts_code_csv_column(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "universe.csv"
+            path.write_text(
+                "ts_code,symbol,name\n"
+                "000001.SZ,000001,平安银行\n"
+                "600000.SH,600000,浦发银行\n",
+                encoding="utf-8",
+            )
+
+            self.assertEqual(_read_symbols_file(path), ["000001.SZ", "600000.SH"])
 
     def test_csv_source_reads_trading_constraints(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
