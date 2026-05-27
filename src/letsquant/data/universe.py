@@ -26,6 +26,7 @@ class UniverseFilters:
     daily_dir: Optional[Path] = None
     liquidity_window: int = 20
     min_avg_amount: Optional[float] = None
+    limit: Optional[int] = None
 
 
 def build_universe_csv(
@@ -43,6 +44,10 @@ def build_universe_csv(
             excluded_count += 1
 
     selected.sort(key=lambda row: str(row.get("ts_code", "")))
+    if filters.limit is not None:
+        if filters.limit <= 0:
+            raise ValueError("limit must be positive")
+        selected = selected[: filters.limit]
     _write_rows(Path(output_path), selected)
     symbols = [str(row["ts_code"]) for row in selected]
     return UniverseResult(path=Path(output_path), symbols=symbols, excluded_count=excluded_count)

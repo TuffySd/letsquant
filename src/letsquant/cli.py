@@ -52,6 +52,7 @@ def main() -> None:
     sync_parser.add_argument("--config", help="optional app config for data_dir, symbols, and dates")
     sync_parser.add_argument("--symbols", help="comma-separated symbols, e.g. 000001.SZ,000002.SZ")
     sync_parser.add_argument("--symbols-file", help="file with symbols separated by lines or commas")
+    sync_parser.add_argument("--limit", type=int, help="limit number of symbols after parsing inputs")
     sync_parser.add_argument("--start-date", help="inclusive start date, YYYY-MM-DD or YYYYMMDD")
     sync_parser.add_argument("--end-date", help="inclusive end date, defaults to today")
     sync_parser.add_argument("--cache-dir", help="output CSV cache directory, defaults to config data_dir")
@@ -115,6 +116,7 @@ def main() -> None:
     adjust_parser.add_argument("--config", help="optional app config for symbols and data_dir")
     adjust_parser.add_argument("--symbols", help="comma-separated symbols, e.g. 000001.SZ,000002.SZ")
     adjust_parser.add_argument("--symbols-file", help="file with symbols separated by lines or commas")
+    adjust_parser.add_argument("--limit", type=int, help="limit number of symbols after parsing inputs")
     adjust_parser.add_argument("--daily-dir", help="raw daily CSV directory, defaults to config data_dir")
     adjust_parser.add_argument("--adj-factor-dir", default="data/adj_factor", help="adj_factor CSV directory")
     adjust_parser.add_argument(
@@ -137,6 +139,7 @@ def main() -> None:
     universe_parser.add_argument("--daily-dir", default="data/daily", help="daily CSV directory for liquidity filters")
     universe_parser.add_argument("--liquidity-window", type=int, default=20, help="recent bars used for avg amount")
     universe_parser.add_argument("--min-avg-amount", type=float, help="minimum average amount over liquidity window")
+    universe_parser.add_argument("--limit", type=int, help="limit number of selected symbols written to output")
 
     args = parser.parse_args()
 
@@ -236,12 +239,14 @@ def add_data_override_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--start-date", help="inclusive start date overriding config.data.start_date")
     parser.add_argument("--end-date", help="inclusive end date overriding config.data.end_date")
     parser.add_argument("--output-dir", help="output directory overriding config output_dir")
+    parser.add_argument("--limit", type=int, help="limit number of symbols after parsing inputs")
 
 
 def apply_data_overrides(config: AppConfig, args: argparse.Namespace) -> AppConfig:
     symbols = _resolve_optional_symbols(getattr(args, "symbols", None), getattr(args, "symbols_file", None))
     data = config.data
     if symbols is not None:
+        symbols = _limit_symbols(symbols, getattr(args, "limit", None))
         data = replace(data, symbols=symbols)
     data_dir = getattr(args, "data_dir", None)
     if data_dir:
@@ -262,7 +267,7 @@ def run_data_sync(args: argparse.Namespace) -> None:
     if args.provider != "tushare":
         raise ValueError(f"unsupported data provider: {args.provider}")
 
-    symbols = _resolve_symbols(args.symbols, args.symbols_file, config)
+    symbols = _limit_symbols(_resolve_symbols(args.symbols, args.symbols_file, config), args.limit)
     start_date = _resolve_start_date(args.start_date, config)
     end_date = parse_date(args.end_date) if args.end_date else None
     if end_date is None:
@@ -359,7 +364,7 @@ def run_data_probe(args: argparse.Namespace) -> None:
 
 def run_data_adjust(args: argparse.Namespace) -> None:
     config = load_config(args.config) if args.config else None
-    symbols = _resolve_symbols(args.symbols, args.symbols_file, config)
+    symbols = _limit_symbols(_resolve_symbols(args.symbols, args.symbols_file, config), args.limit)
     daily_dir = Path(args.daily_dir) if args.daily_dir else None
     if daily_dir is None and config is not None:
         daily_dir = config.data.data_dir
@@ -405,6 +410,7 @@ def run_data_universe(args: argparse.Namespace) -> None:
         daily_dir=Path(args.daily_dir),
         liquidity_window=args.liquidity_window,
         min_avg_amount=args.min_avg_amount,
+        limit=args.limit,
     )
     result = build_universe_csv(
         stock_basic_path=Path(args.stock_basic),
@@ -456,6 +462,14 @@ def _resolve_optional_symbols(symbols_arg: Optional[str], symbols_file: Optional
     if not symbols:
         return None
     return _dedupe_symbols(symbols)
+
+
+def _limit_symbols(symbols: List[str], limit: Optional[int]) -> List[str]:
+    if limit is None:
+        return symbols
+    if limit <= 0:
+        raise ValueError("limit must be positive")
+    return symbols[:limit]
 
 
 def _read_symbols_file(path: Path) -> List[str]:

@@ -83,6 +83,25 @@ class UniverseTests(unittest.TestCase):
             self.assertEqual(result.symbols, ["000001.SZ"])
             self.assertEqual(result.excluded_count, 1)
 
+    def test_build_universe_limits_selected_symbols(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            stock_basic = root / "stock_basic.csv"
+            stock_basic.write_text(
+                "ts_code,symbol,name,area,industry,list_date\n"
+                "000001.SZ,000001,平安银行,深圳,银行,19910403\n"
+                "000002.SZ,000002,万科A,深圳,地产,19910129\n",
+                encoding="utf-8",
+            )
+
+            result = build_universe_csv(
+                stock_basic_path=stock_basic,
+                output_path=root / "universe.csv",
+                filters=UniverseFilters(as_of_date=date(2024, 3, 1), limit=1),
+            )
+
+            self.assertEqual(result.symbols, ["000001.SZ"])
+
     def test_parse_exchange_set_normalizes_case(self) -> None:
         self.assertEqual(parse_exchange_set("sh, sz"), {"SH", "SZ"})
 

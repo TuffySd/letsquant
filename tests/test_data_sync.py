@@ -5,7 +5,7 @@ from datetime import date
 from pathlib import Path
 from typing import Dict, List
 
-from letsquant.cli import _read_symbols_file, _resolve_symbols, _split_symbols, apply_data_overrides
+from letsquant.cli import _limit_symbols, _read_symbols_file, _resolve_symbols, _split_symbols, apply_data_overrides
 from letsquant.config import AppConfig, CostConfig, DataConfig, RiskConfig, StrategyConfig
 from letsquant.data.csv_source import CsvBarSource
 from letsquant.data.tushare_source import TushareDailySource, TushareProbeCase
@@ -217,6 +217,7 @@ class DataSyncTests(unittest.TestCase):
                     "start_date": "2024-01-02",
                     "end_date": "2024-12-31",
                     "output_dir": "results/real",
+                    "limit": 1,
                 },
             )()
             config = AppConfig(
@@ -230,11 +231,16 @@ class DataSyncTests(unittest.TestCase):
 
             updated = apply_data_overrides(config, args)
 
-            self.assertEqual(updated.data.symbols, ["600000.SH", "000001.SZ"])
+            self.assertEqual(updated.data.symbols, ["600000.SH"])
             self.assertEqual(updated.data.data_dir, Path("data/qfq_daily"))
             self.assertEqual(updated.data.start_date.isoformat(), "2024-01-02")
             self.assertEqual(updated.data.end_date.isoformat(), "2024-12-31")
             self.assertEqual(updated.output_dir, Path("results/real"))
+
+    def test_limit_symbols_validates_positive_limit(self) -> None:
+        self.assertEqual(_limit_symbols(["000001.SZ", "600000.SH"], 1), ["000001.SZ"])
+        with self.assertRaises(ValueError):
+            _limit_symbols(["000001.SZ"], 0)
 
     def test_csv_source_reads_trading_constraints(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

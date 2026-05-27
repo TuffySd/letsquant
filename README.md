@@ -80,7 +80,8 @@ PYTHONPATH=src python -m letsquant.cli data universe \
   --min-listed-days 180 \
   --daily-dir data/daily \
   --liquidity-window 20 \
-  --min-avg-amount 50000000
+  --min-avg-amount 50000000 \
+  --limit 50
 ```
 
 生成后的 `data/universe/default.csv` 可以直接作为 `data sync --symbols-file` 输入。
@@ -91,12 +92,14 @@ PYTHONPATH=src python -m letsquant.cli data universe \
 PYTHONPATH=src python -m letsquant.cli backtest \
   --config configs/a_share_midterm.json \
   --symbols-file data/universe/default.csv \
+  --limit 50 \
   --data-dir data/qfq_daily \
   --output-dir results/real_backtest
 
 PYTHONPATH=src python -m letsquant.cli signal \
   --config configs/a_share_midterm.json \
   --symbols-file data/universe/default.csv \
+  --limit 50 \
   --data-dir data/qfq_daily \
   --portfolio configs/live_portfolio.example.json \
   --output-dir results/real_signal
