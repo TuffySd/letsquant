@@ -17,6 +17,7 @@ from letsquant.reports import (
     write_equity_curve,
     write_metrics,
     write_manual_orders,
+    write_order_rejections,
     write_signals,
     write_trades,
 )
@@ -109,6 +110,7 @@ def run_backtest(config: AppConfig) -> None:
     output_dir = ensure_output_dir(config.output_dir)
     write_metrics(output_dir / "metrics.json", result.metrics)
     write_trades(output_dir / "trades.csv", result.trades)
+    write_order_rejections(output_dir / "order_rejections.csv", result.order_rejections)
     write_signals(output_dir / "signals.csv", result.signals)
     write_equity_curve(output_dir / "equity_curve.csv", result.snapshots)
 

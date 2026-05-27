@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Dict, List
 
 from letsquant.cli import _resolve_symbols, _split_symbols
+from letsquant.data.csv_source import CsvBarSource
 from letsquant.data.tushare_source import TushareDailySource, TushareProbeCase
 
 
@@ -146,6 +147,20 @@ class DataSyncTests(unittest.TestCase):
         self.assertEqual(_split_symbols("000001.SZ, 000002.SZ\n# comment"), ["000001.SZ", "000002.SZ"])
         symbols = _resolve_symbols("000001.SZ,000001.SZ", None, None)
         self.assertEqual(symbols, ["000001.SZ"])
+
+    def test_csv_source_reads_trading_constraints(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "000001.SZ.csv"
+            path.write_text(
+                "trade_date,ts_code,open,high,low,close,vol,amount,is_suspended,limit_up,limit_down\n"
+                "20240102,000001.SZ,10,10.2,9.8,10.1,1000,10000,1,11,9\n",
+                encoding="utf-8",
+            )
+            bars = CsvBarSource(Path(temp_dir)).load_bars(["000001.SZ"])
+
+            self.assertTrue(bars["000001.SZ"][0].is_suspended)
+            self.assertEqual(bars["000001.SZ"][0].limit_up, 11)
+            self.assertEqual(bars["000001.SZ"][0].limit_down, 9)
 
 
 if __name__ == "__main__":

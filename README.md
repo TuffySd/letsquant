@@ -59,6 +59,7 @@ PYTHONPATH=src python -m letsquant.cli data sync --config configs/a_share_midter
 
 - `metrics.json`：收益、回撤、夏普、交易次数等指标。
 - `trades.csv`：实际成交记录。
+- `order_rejections.csv`：因停牌、涨停买入、跌停卖出等约束未成交的信号。
 - `signals.csv`：历史信号记录。
 - `equity_curve.csv`：每日权益曲线。
 - `current_signals.csv`：当前最新收盘后的待确认人工指令。
@@ -73,6 +74,7 @@ PYTHONPATH=src python -m letsquant.cli data sync --config configs/a_share_midter
 - 行情：`open`、`high`、`low`、`close`。
 - 成交量：`vol` 或 `volume`。
 - 成交额：`amount` 可选。
+- 交易约束：`is_suspended` / `suspended` / `paused`、`limit_up` / `up_limit`、`limit_down` / `down_limit` 可选。
 
 ## 策略说明
 
@@ -80,7 +82,7 @@ PYTHONPATH=src python -m letsquant.cli data sync --config configs/a_share_midter
 
 - 入场：短中长期均线多头排列，收盘价突破前 N 日高点，动量为正，成交量不低于近期均量阈值。
 - 出场：跌破中期均线、触发固定止损、触发移动止盈、超过最长持仓天数。
-- 执行：第 T 日收盘后生成信号，第 T+1 个可交易日按开盘价加滑点成交。
+- 执行：第 T 日收盘后生成信号，第 T+1 个可交易日按开盘价加滑点成交；若数据标记停牌、涨停买入或跌停卖出，则记录为拒单。
 
 这只是第一条基准线，用来验证数据、成本、风控和复盘流程。后续策略应该先和它做同一套回测对照。
 

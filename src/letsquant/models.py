@@ -20,6 +20,9 @@ class Bar:
     close: float
     volume: float = 0.0
     amount: Optional[float] = None
+    is_suspended: bool = False
+    limit_up: Optional[float] = None
+    limit_down: Optional[float] = None
 
     def __post_init__(self) -> None:
         if not self.symbol:
@@ -32,6 +35,10 @@ class Bar:
             raise ValueError(f"open is outside high/low for {self.symbol} {self.date}")
         if self.close > self.high or self.close < self.low:
             raise ValueError(f"close is outside high/low for {self.symbol} {self.date}")
+        if self.limit_up is not None and self.limit_up <= 0:
+            raise ValueError(f"limit_up must be positive for {self.symbol} {self.date}")
+        if self.limit_down is not None and self.limit_down <= 0:
+            raise ValueError(f"limit_down must be positive for {self.symbol} {self.date}")
 
 
 @dataclass
@@ -81,6 +88,16 @@ class Trade:
     @property
     def total_costs(self) -> float:
         return self.commission + self.stamp_tax + self.transfer_fee
+
+
+@dataclass(frozen=True)
+class OrderRejection:
+    trade_date: date
+    symbol: str
+    action: Action
+    reason: str
+    signal_reason: str
+    reference_price: Optional[float] = None
 
 
 @dataclass(frozen=True)

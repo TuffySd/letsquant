@@ -55,6 +55,11 @@ class CsvBarSource:
                         close=float(row["close"]),
                         volume=float(row.get("vol") or row.get("volume") or 0),
                         amount=self._optional_float(row.get("amount")),
+                        is_suspended=self._optional_bool(
+                            row.get("is_suspended") or row.get("suspended") or row.get("paused")
+                        ),
+                        limit_up=self._optional_float(row.get("limit_up") or row.get("up_limit")),
+                        limit_down=self._optional_float(row.get("limit_down") or row.get("down_limit")),
                     )
                 )
 
@@ -75,6 +80,17 @@ class CsvBarSource:
         if value in (None, ""):
             return None
         return float(value)
+
+    @staticmethod
+    def _optional_bool(value: Optional[str]) -> bool:
+        if value is None:
+            return False
+        text = str(value).strip().lower()
+        if text in ("", "0", "false", "f", "no", "n"):
+            return False
+        if text in ("1", "true", "t", "yes", "y"):
+            return True
+        raise ValueError(f"invalid boolean value: {value}")
 
     @staticmethod
     def _ensure_unique_dates(symbol: str, bars: List[Bar]) -> None:

@@ -6,7 +6,7 @@ from typing import Dict, Iterable, List, Optional
 
 from letsquant.config import CostConfig, RiskConfig
 from letsquant.indicators import max_drawdown
-from letsquant.models import Action, Bar, PortfolioSnapshot, Position, Signal, Trade
+from letsquant.models import Action, Bar, OrderRejection, PortfolioSnapshot, Position, Signal, Trade
 from letsquant.strategies.base import Strategy
 
 
@@ -16,6 +16,7 @@ class BacktestResult:
     signals: List[Signal]
     snapshots: List[PortfolioSnapshot]
     pending_orders: List[Signal]
+    order_rejections: List[OrderRejection]
     metrics: Dict[str, float]
 
 
@@ -40,6 +41,7 @@ class Backtester:
         trades: List[Trade] = []
         signals: List[Signal] = []
         pending_orders: List[Signal] = []
+        order_rejections: List[OrderRejection] = []
         snapshots: List[PortfolioSnapshot] = []
         latest_close: Dict[str, float] = {}
         peak_equity = self.initial_cash
@@ -58,6 +60,7 @@ class Backtester:
                 latest_close,
                 cash,
                 trades,
+                order_rejections,
             )
             pending_orders = [
                 signal for signal in pending_orders if signal.symbol not in day_bars
@@ -93,7 +96,8 @@ class Backtester:
                     pending_orders.append(signal)
 
         metrics = self._metrics(snapshots, trades)
-        return BacktestResult(trades, signals, snapshots, pending_orders, metrics)
+        metrics["order_rejection_count"] = float(len(order_rejections))
+        return BacktestResult(trades, signals, snapshots, pending_orders, order_rejections, metrics)
 
     def _execute_pending(
         self,
@@ -104,10 +108,25 @@ class Backtester:
         latest_close: Dict[str, float],
         cash: float,
         trades: List[Trade],
+        order_rejections: List[OrderRejection],
     ) -> float:
         for signal in list(pending_orders):
             bar = day_bars.get(signal.symbol)
             if bar is None:
+                continue
+
+            rejection_reason = self._trade_rejection_reason(signal.action, bar)
+            if rejection_reason is not None:
+                order_rejections.append(
+                    OrderRejection(
+                        trade_date=current_date,
+                        symbol=signal.symbol,
+                        action=signal.action,
+                        reason=rejection_reason,
+                        signal_reason=signal.reason,
+                        reference_price=signal.reference_price,
+                    )
+                )
                 continue
 
             if signal.action == Action.BUY:
@@ -282,6 +301,17 @@ class Backtester:
         if self.risk.lot_size <= 0:
             return shares
         return shares // self.risk.lot_size * self.risk.lot_size
+
+    @staticmethod
+    def _trade_rejection_reason(action: Action, bar: Bar) -> Optional[str]:
+        tolerance = 1e-8
+        if bar.is_suspended:
+            return "suspended"
+        if action == Action.BUY and bar.limit_up is not None and bar.open >= bar.limit_up - tolerance:
+            return "limit_up"
+        if action == Action.SELL and bar.limit_down is not None and bar.open <= bar.limit_down + tolerance:
+            return "limit_down"
+        return None
 
     @staticmethod
     def _index_by_date(bars_by_symbol: Dict[str, List[Bar]]) -> Dict[date, Dict[str, Bar]]:

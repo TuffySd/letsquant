@@ -1,10 +1,11 @@
 import unittest
 from datetime import date, timedelta
-from typing import List
+from typing import List, Optional
 
 from letsquant.config import CostConfig, RiskConfig
 from letsquant.execution import Backtester
-from letsquant.models import Action, Bar
+from letsquant.models import Action, Bar, Position, Signal
+from letsquant.strategies.base import Strategy
 from letsquant.strategies import TrendBreakoutStrategy
 
 
@@ -27,6 +28,20 @@ def synthetic_bars() -> List[Bar]:
             )
         )
     return bars
+
+
+class ScriptedStrategy(Strategy):
+    def generate(
+        self,
+        symbol: str,
+        history: List[Bar],
+        position: Optional[Position],
+    ) -> Signal:
+        if len(history) == 1 and position is None:
+            return Signal(history[-1].date, symbol, Action.BUY, "scripted buy", reference_price=history[-1].close)
+        if len(history) == 2 and position is not None:
+            return Signal(history[-1].date, symbol, Action.SELL, "scripted sell", reference_price=history[-1].close)
+        return Signal(history[-1].date, symbol, Action.HOLD, "hold", reference_price=history[-1].close)
 
 
 class BacktesterTests(unittest.TestCase):
@@ -56,6 +71,44 @@ class BacktesterTests(unittest.TestCase):
         self.assertEqual(result.trades[0].action, Action.BUY)
         self.assertEqual(result.trades[0].shares % 100, 0)
         self.assertIn("total_return", result.metrics)
+
+    def test_backtester_rejects_buy_when_next_open_is_limit_up(self) -> None:
+        bars = [
+            Bar("000001.SZ", date(2024, 1, 2), 10, 10.2, 9.8, 10),
+            Bar("000001.SZ", date(2024, 1, 3), 11, 11, 10.8, 11, limit_up=11),
+        ]
+        backtester = Backtester(
+            strategy=ScriptedStrategy(),
+            initial_cash=100000,
+            risk=RiskConfig(max_position_pct=0.2, max_positions=5, cash_reserve_pct=0.05),
+            costs=CostConfig(slippage_bps=0),
+        )
+        result = backtester.run({"000001.SZ": bars})
+
+        self.assertEqual(result.trades, [])
+        self.assertEqual(len(result.order_rejections), 1)
+        self.assertEqual(result.order_rejections[0].reason, "limit_up")
+        self.assertEqual(result.metrics["order_rejection_count"], 1.0)
+
+    def test_backtester_rejects_sell_when_next_open_is_limit_down(self) -> None:
+        bars = [
+            Bar("000001.SZ", date(2024, 1, 2), 10, 10.2, 9.8, 10),
+            Bar("000001.SZ", date(2024, 1, 3), 10.1, 10.3, 10, 10.2),
+            Bar("000001.SZ", date(2024, 1, 4), 9.2, 9.4, 9.2, 9.3, limit_down=9.2),
+        ]
+        backtester = Backtester(
+            strategy=ScriptedStrategy(),
+            initial_cash=100000,
+            risk=RiskConfig(max_position_pct=0.2, max_positions=5, cash_reserve_pct=0.05),
+            costs=CostConfig(slippage_bps=0),
+        )
+        result = backtester.run({"000001.SZ": bars})
+
+        self.assertEqual(len(result.trades), 1)
+        self.assertEqual(result.trades[0].action, Action.BUY)
+        self.assertEqual(len(result.order_rejections), 1)
+        self.assertEqual(result.order_rejections[0].action, Action.SELL)
+        self.assertEqual(result.order_rejections[0].reason, "limit_down")
 
 
 if __name__ == "__main__":

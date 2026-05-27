@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 from typing import Dict, Iterable
 
-from letsquant.models import ManualOrder, PortfolioSnapshot, Signal, Trade
+from letsquant.models import ManualOrder, OrderRejection, PortfolioSnapshot, Signal, Trade
 
 
 def ensure_output_dir(path: Path) -> Path:
@@ -49,6 +49,33 @@ def write_trades(path: Path, trades: Iterable[Trade]) -> None:
                     "cash_flow": f"{trade.cash_flow:.2f}",
                     "pnl": f"{trade.pnl:.2f}",
                     "reason": trade.reason,
+                }
+            )
+
+
+def write_order_rejections(path: Path, rejections: Iterable[OrderRejection]) -> None:
+    fieldnames = [
+        "trade_date",
+        "symbol",
+        "action",
+        "reason",
+        "signal_reason",
+        "reference_price",
+    ]
+    with path.open("w", encoding="utf-8", newline="") as fh:
+        writer = csv.DictWriter(fh, fieldnames=fieldnames)
+        writer.writeheader()
+        for rejection in rejections:
+            writer.writerow(
+                {
+                    "trade_date": rejection.trade_date.isoformat(),
+                    "symbol": rejection.symbol,
+                    "action": rejection.action.value,
+                    "reason": rejection.reason,
+                    "signal_reason": rejection.signal_reason,
+                    "reference_price": ""
+                    if rejection.reference_price is None
+                    else f"{rejection.reference_price:.4f}",
                 }
             )
 
