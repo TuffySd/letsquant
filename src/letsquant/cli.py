@@ -131,6 +131,9 @@ def main() -> None:
     universe_parser.add_argument("--include-st", action="store_true", help="include ST and *ST names")
     universe_parser.add_argument("--include-industries", help="comma-separated industries to keep")
     universe_parser.add_argument("--exclude-industries", help="comma-separated industries to remove")
+    universe_parser.add_argument("--daily-dir", default="data/daily", help="daily CSV directory for liquidity filters")
+    universe_parser.add_argument("--liquidity-window", type=int, default=20, help="recent bars used for avg amount")
+    universe_parser.add_argument("--min-avg-amount", type=float, help="minimum average amount over liquidity window")
 
     args = parser.parse_args()
 
@@ -356,6 +359,8 @@ def run_data_universe(args: argparse.Namespace) -> None:
         raise ValueError("as-of-date is required")
     if args.min_listed_days < 0:
         raise ValueError("min-listed-days cannot be negative")
+    if args.liquidity_window <= 0:
+        raise ValueError("liquidity-window must be positive")
     filters = UniverseFilters(
         as_of_date=as_of_date,
         min_listed_days=args.min_listed_days,
@@ -364,6 +369,9 @@ def run_data_universe(args: argparse.Namespace) -> None:
         exclude_st=not args.include_st,
         include_industries=parse_csv_set(args.include_industries),
         exclude_industries=parse_csv_set(args.exclude_industries),
+        daily_dir=Path(args.daily_dir),
+        liquidity_window=args.liquidity_window,
+        min_avg_amount=args.min_avg_amount,
     )
     result = build_universe_csv(
         stock_basic_path=Path(args.stock_basic),
@@ -373,7 +381,8 @@ def run_data_universe(args: argparse.Namespace) -> None:
     print(
         "Universe build complete. "
         f"stock_basic={args.stock_basic} output={result.path} as_of_date={as_of_date.isoformat()} "
-        f"selected={len(result.symbols)} excluded={result.excluded_count}"
+        f"selected={len(result.symbols)} excluded={result.excluded_count} "
+        f"min_avg_amount={args.min_avg_amount or 0:.2f}"
     )
     print(result.path)
 

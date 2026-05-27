@@ -77,7 +77,10 @@ PYTHONPATH=src python -m letsquant.cli data universe \
   --stock-basic data/stocks/stock_basic.csv \
   --output data/universe/default.csv \
   --as-of-date 2024-01-05 \
-  --min-listed-days 180
+  --min-listed-days 180 \
+  --daily-dir data/daily \
+  --liquidity-window 20 \
+  --min-avg-amount 50000000
 ```
 
 生成后的 `data/universe/default.csv` 可以直接作为 `data sync --symbols-file` 输入。

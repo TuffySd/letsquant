@@ -23,6 +23,9 @@ class UniverseFilters:
     exclude_st: bool = True
     include_industries: Optional[Set[str]] = None
     exclude_industries: Optional[Set[str]] = None
+    daily_dir: Optional[Path] = None
+    liquidity_window: int = 20
+    min_avg_amount: Optional[float] = None
 
 
 def build_universe_csv(
@@ -68,7 +71,21 @@ def _include_stock(row: dict[str, str], filters: UniverseFilters) -> bool:
     if list_date is None:
         return False
     listed_days = (filters.as_of_date - list_date).days
-    return listed_days >= filters.min_listed_days
+    if listed_days < filters.min_listed_days:
+        return False
+
+    if filters.min_avg_amount is not None:
+        if filters.daily_dir is None:
+            raise ValueError("daily_dir is required when min_avg_amount is set")
+        avg_amount = _average_amount(
+            filters.daily_dir / f"{ts_code}.csv",
+            filters.as_of_date,
+            filters.liquidity_window,
+        )
+        if avg_amount is None or avg_amount < filters.min_avg_amount:
+            return False
+
+    return True
 
 
 def _exchange_from_ts_code(ts_code: str) -> str:
@@ -85,6 +102,27 @@ def _is_st_name(name: str) -> bool:
 def _read_rows(path: Path) -> List[dict[str, str]]:
     with path.open("r", encoding="utf-8-sig", newline="") as fh:
         return [dict(row) for row in csv.DictReader(fh)]
+
+
+def _average_amount(path: Path, as_of_date: date, window: int) -> Optional[float]:
+    if window <= 0:
+        raise ValueError("liquidity_window must be positive")
+    if not path.exists():
+        return None
+
+    rows = []
+    for row in _read_rows(path):
+        trade_date = parse_date(row.get("trade_date") or row.get("date"))
+        amount = row.get("amount")
+        if trade_date is None or trade_date > as_of_date or amount in (None, ""):
+            continue
+        rows.append((trade_date, float(amount)))
+
+    if not rows:
+        return None
+    rows.sort(key=lambda item: item[0])
+    recent = rows[-window:]
+    return sum(amount for _, amount in recent) / len(recent)
 
 
 def _write_rows(path: Path, rows: List[dict[str, str]]) -> None:
