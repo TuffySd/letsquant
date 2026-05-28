@@ -71,6 +71,11 @@ class BacktesterTests(unittest.TestCase):
         self.assertEqual(result.trades[0].action, Action.BUY)
         self.assertEqual(result.trades[0].shares % 100, 0)
         self.assertIn("total_return", result.metrics)
+        self.assertIn("calmar", result.metrics)
+        self.assertIn("turnover", result.metrics)
+        self.assertIn("avg_holding_days", result.metrics)
+        self.assertIn("yearly_return_2024", result.metrics)
+        self.assertIn("monthly_return_2024_01", result.metrics)
 
     def test_backtester_rejects_buy_when_next_open_is_limit_up(self) -> None:
         bars = [
@@ -109,6 +114,25 @@ class BacktesterTests(unittest.TestCase):
         self.assertEqual(len(result.order_rejections), 1)
         self.assertEqual(result.order_rejections[0].action, Action.SELL)
         self.assertEqual(result.order_rejections[0].reason, "limit_down")
+
+    def test_backtester_reports_holding_days_and_turnover(self) -> None:
+        bars = [
+            Bar("000001.SZ", date(2024, 1, 2), 10, 10.2, 9.8, 10),
+            Bar("000001.SZ", date(2024, 1, 3), 10.1, 10.3, 10, 10.2),
+            Bar("000001.SZ", date(2024, 1, 4), 10.4, 10.5, 10.2, 10.4),
+        ]
+        backtester = Backtester(
+            strategy=ScriptedStrategy(),
+            initial_cash=100000,
+            risk=RiskConfig(max_position_pct=0.2, max_positions=5, cash_reserve_pct=0.05),
+            costs=CostConfig(slippage_bps=0),
+        )
+        result = backtester.run({"000001.SZ": bars})
+
+        self.assertEqual(len(result.trades), 2)
+        self.assertEqual(result.metrics["avg_holding_days"], 1.0)
+        self.assertGreater(result.metrics["turnover"], 0)
+        self.assertIn("monthly_return_2024_01", result.metrics)
 
 
 if __name__ == "__main__":

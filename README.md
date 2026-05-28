@@ -136,7 +136,7 @@ make PYTHON=.conda/envs/letsquant/bin/python real-smoke REAL_LIMIT=20 REAL_START
 
 回测结果默认输出到 `results/`：
 
-- `metrics.json`：收益、回撤、夏普、交易次数等指标。
+- `metrics.json`：收益、回撤、Calmar、夏普、交易次数、胜率、平均持仓天数、换手率、年度收益和月度收益等指标。
 - 真实配置默认从 `data/index_daily/000300.SH.csv` 读取沪深 300 基准，`metrics.json` 会追加 `benchmark_total_return`、`benchmark_max_drawdown`、`excess_total_return` 等对比指标。
 - `validation_metrics.json`：`validate` 命令按 `--split-date` 输出样本内、样本外和稳健性摘要；两段明细分别写入 `in_sample/` 和 `out_sample/`。
 - `trades.csv`：实际成交记录。

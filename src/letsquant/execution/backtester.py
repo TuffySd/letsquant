@@ -2,7 +2,7 @@ import math
 import statistics
 from dataclasses import dataclass
 from datetime import date
-from typing import Dict, Iterable, List, Optional
+from typing import Callable, Dict, Iterable, List, Optional
 
 from letsquant.config import CostConfig, RiskConfig
 from letsquant.indicators import max_drawdown
@@ -240,9 +240,13 @@ class Backtester:
                 "total_return": 0.0,
                 "annualized_return": 0.0,
                 "max_drawdown": 0.0,
+                "calmar": 0.0,
                 "sharpe": 0.0,
                 "trade_count": 0.0,
+                "sell_count": 0.0,
                 "win_rate": 0.0,
+                "avg_holding_days": 0.0,
+                "turnover": 0.0,
             }
 
         equities = [snapshot.equity for snapshot in snapshots]
@@ -261,17 +265,57 @@ class Backtester:
         sell_trades = [trade for trade in trades if trade.action == Action.SELL]
         wins = [trade for trade in sell_trades if trade.pnl > 0]
 
-        return {
+        max_dd = max_drawdown(equities)
+        avg_equity = statistics.mean(equities) if equities else self.initial_cash
+        gross_traded = sum(trade.gross_value for trade in trades)
+        metrics = {
             "initial_cash": self.initial_cash,
             "final_equity": final_equity,
             "total_return": total_return,
             "annualized_return": annualized_return,
-            "max_drawdown": max_drawdown(equities),
+            "max_drawdown": max_dd,
+            "calmar": annualized_return / abs(max_dd) if max_dd < 0 else 0.0,
             "sharpe": sharpe,
             "trade_count": float(len(trades)),
             "sell_count": float(len(sell_trades)),
             "win_rate": len(wins) / len(sell_trades) if sell_trades else 0.0,
+            "avg_holding_days": self._avg_holding_days(trades),
+            "turnover": gross_traded / avg_equity if avg_equity > 0 else 0.0,
         }
+        metrics.update(self._period_returns(snapshots, "yearly", lambda item: f"{item.date.year:04d}"))
+        metrics.update(
+            self._period_returns(snapshots, "monthly", lambda item: f"{item.date.year:04d}_{item.date.month:02d}")
+        )
+        return metrics
+
+    @staticmethod
+    def _avg_holding_days(trades: List[Trade]) -> float:
+        entry_dates: Dict[str, date] = {}
+        holding_days: List[int] = []
+        for trade in trades:
+            if trade.action == Action.BUY:
+                entry_dates[trade.symbol] = trade.trade_date
+            elif trade.action == Action.SELL and trade.symbol in entry_dates:
+                holding_days.append((trade.trade_date - entry_dates.pop(trade.symbol)).days)
+        return float(statistics.mean(holding_days)) if holding_days else 0.0
+
+    @staticmethod
+    def _period_returns(
+        snapshots: List[PortfolioSnapshot],
+        prefix: str,
+        key_fn: Callable[[PortfolioSnapshot], str],
+    ) -> Dict[str, float]:
+        periods: Dict[str, List[PortfolioSnapshot]] = {}
+        for snapshot in snapshots:
+            key = key_fn(snapshot)
+            periods.setdefault(key, []).append(snapshot)
+        returns: Dict[str, float] = {}
+        for key, items in periods.items():
+            start_equity = items[0].equity
+            if start_equity <= 0:
+                continue
+            returns[f"{prefix}_return_{key}"] = items[-1].equity / start_equity - 1
+        return returns
 
     def _equity(
         self,
