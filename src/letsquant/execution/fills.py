@@ -49,6 +49,22 @@ class FillReconciliation:
     note: str
 
 
+@dataclass(frozen=True)
+class ReplayPosition:
+    symbol: str
+    shares: int
+    avg_cost: float
+    realized_pnl: float
+
+
+@dataclass(frozen=True)
+class FillReplayResult:
+    initial_cash: float
+    cash: float
+    positions: List[ReplayPosition]
+    realized_pnl: float
+
+
 def read_manual_orders(path: Path) -> List[ManualOrder]:
     with path.open("r", encoding="utf-8-sig", newline="") as fh:
         return [_manual_order_from_row(row) for row in csv.DictReader(fh)]
@@ -122,6 +138,81 @@ def write_fill_reconciliation(path: Path, rows: Iterable[FillReconciliation]) ->
             )
 
 
+def replay_fills(fills: Iterable[Fill], initial_cash: float) -> FillReplayResult:
+    if initial_cash < 0:
+        raise ValueError("initial_cash cannot be negative")
+    cash = initial_cash
+    positions: Dict[str, ReplayPosition] = {}
+    realized_pnl = 0.0
+    ordered = sorted(fills, key=lambda fill: (fill.trade_date, fill.symbol, fill.action.value))
+    for fill in ordered:
+        if fill.shares <= 0:
+            raise ValueError(f"fill shares must be positive: {fill}")
+        if fill.action == Action.BUY:
+            cash -= fill.gross_value + fill.total_costs
+            positions[fill.symbol] = _apply_buy(positions.get(fill.symbol), fill)
+        elif fill.action == Action.SELL:
+            position = positions.get(fill.symbol)
+            if position is None or fill.shares > position.shares:
+                raise ValueError(f"cannot sell {fill.shares} shares of {fill.symbol}; position is insufficient")
+            cash += fill.gross_value - fill.total_costs
+            sell_pnl = fill.gross_value - fill.total_costs - fill.shares * position.avg_cost
+            realized_pnl += sell_pnl
+            remaining = position.shares - fill.shares
+            if remaining > 0:
+                positions[fill.symbol] = ReplayPosition(
+                    symbol=fill.symbol,
+                    shares=remaining,
+                    avg_cost=position.avg_cost,
+                    realized_pnl=position.realized_pnl + sell_pnl,
+                )
+            else:
+                positions.pop(fill.symbol)
+        else:
+            continue
+
+    return FillReplayResult(
+        initial_cash=initial_cash,
+        cash=cash,
+        positions=sorted(positions.values(), key=lambda item: item.symbol),
+        realized_pnl=realized_pnl,
+    )
+
+
+def write_replay_positions(path: Path, result: FillReplayResult) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fieldnames = ["symbol", "shares", "avg_cost", "market_value_at_cost", "realized_pnl"]
+    with path.open("w", encoding="utf-8", newline="") as fh:
+        writer = csv.DictWriter(fh, fieldnames=fieldnames)
+        writer.writeheader()
+        for position in result.positions:
+            writer.writerow(
+                {
+                    "symbol": position.symbol,
+                    "shares": position.shares,
+                    "avg_cost": f"{position.avg_cost:.4f}",
+                    "market_value_at_cost": f"{position.shares * position.avg_cost:.2f}",
+                    "realized_pnl": f"{position.realized_pnl:.2f}",
+                }
+            )
+
+
+def write_replay_summary(path: Path, result: FillReplayResult) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fieldnames = ["initial_cash", "cash", "position_count", "realized_pnl"]
+    with path.open("w", encoding="utf-8", newline="") as fh:
+        writer = csv.DictWriter(fh, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerow(
+            {
+                "initial_cash": f"{result.initial_cash:.2f}",
+                "cash": f"{result.cash:.2f}",
+                "position_count": len(result.positions),
+                "realized_pnl": f"{result.realized_pnl:.2f}",
+            }
+        )
+
+
 def _manual_order_from_row(row: Dict[str, str]) -> ManualOrder:
     signal_date = parse_date(row.get("signal_date"))
     if signal_date is None:
@@ -154,6 +245,24 @@ def _fill_from_row(row: Dict[str, str]) -> Fill:
         stamp_tax=float(row.get("stamp_tax") or 0),
         transfer_fee=float(row.get("transfer_fee") or 0),
         note=row.get("note", ""),
+    )
+
+
+def _apply_buy(position: ReplayPosition | None, fill: Fill) -> ReplayPosition:
+    if position is None:
+        return ReplayPosition(
+            symbol=fill.symbol,
+            shares=fill.shares,
+            avg_cost=(fill.gross_value + fill.total_costs) / fill.shares,
+            realized_pnl=0.0,
+        )
+    total_shares = position.shares + fill.shares
+    total_cost = position.shares * position.avg_cost + fill.gross_value + fill.total_costs
+    return ReplayPosition(
+        symbol=fill.symbol,
+        shares=total_shares,
+        avg_cost=total_cost / total_shares,
+        realized_pnl=position.realized_pnl,
     )
 
 

@@ -19,7 +19,15 @@ from letsquant.data.universe import (
     parse_exchange_set,
 )
 from letsquant.execution import BacktestResult, Backtester
-from letsquant.execution.fills import read_fills, read_manual_orders, reconcile_fills, write_fill_reconciliation
+from letsquant.execution.fills import (
+    read_fills,
+    read_manual_orders,
+    reconcile_fills,
+    replay_fills,
+    write_fill_reconciliation,
+    write_replay_positions,
+    write_replay_summary,
+)
 from letsquant.execution.instructions import build_manual_orders
 from letsquant.models import Action, Bar, PortfolioSnapshot, Position, Signal
 from letsquant.reports import (
@@ -62,6 +70,10 @@ def main() -> None:
         default="results/fill_reconciliation.csv",
         help="output reconciliation CSV path",
     )
+    replay_parser = fills_subparsers.add_parser("replay", help="replay actual fills into current positions")
+    replay_parser.add_argument("--fills", required=True, help="actual fills CSV path")
+    replay_parser.add_argument("--initial-cash", type=float, required=True, help="starting cash before fills")
+    replay_parser.add_argument("--output-dir", default="results/fill_replay", help="output directory")
 
     data_parser = subparsers.add_parser("data", help="data maintenance commands")
     data_subparsers = data_parser.add_subparsers(dest="data_command", required=True)
@@ -179,6 +191,8 @@ def main() -> None:
             run_signal(config, args.portfolio)
         elif args.command == "fills" and args.fills_command == "reconcile":
             run_fill_reconciliation(args)
+        elif args.command == "fills" and args.fills_command == "replay":
+            run_fill_replay(args)
         elif args.command == "data" and args.data_command == "sync":
             run_data_sync(args)
         elif args.command == "data" and args.data_command == "probe":
@@ -328,6 +342,27 @@ def run_fill_reconciliation(args: argparse.Namespace) -> None:
         status_counts[row.status] = status_counts.get(row.status, 0) + 1
     print(f"Fill reconciliation complete. Output: {output_path}")
     print(json.dumps(status_counts, ensure_ascii=False, indent=2))
+
+
+def run_fill_replay(args: argparse.Namespace) -> None:
+    result = replay_fills(read_fills(Path(args.fills)), args.initial_cash)
+    output_dir = ensure_output_dir(Path(args.output_dir))
+    positions_path = output_dir / "positions.csv"
+    summary_path = output_dir / "summary.csv"
+    write_replay_positions(positions_path, result)
+    write_replay_summary(summary_path, result)
+    print(f"Fill replay complete. Output: {output_dir}")
+    print(
+        json.dumps(
+            {
+                "cash": result.cash,
+                "position_count": len(result.positions),
+                "realized_pnl": result.realized_pnl,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
 
 
 def load_bars(config: AppConfig) -> Dict[str, List[Bar]]:

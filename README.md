@@ -19,6 +19,7 @@ PYTHONPATH=src python -m letsquant.cli validate --config configs/sample_backtest
 PYTHONPATH=src python -m letsquant.cli signal --config configs/sample_backtest.json
 PYTHONPATH=src python -m letsquant.cli signal --config configs/sample_backtest.json --portfolio configs/live_portfolio.example.json
 PYTHONPATH=src python -m letsquant.cli fills reconcile --orders results/manual_orders.csv --fills configs/fills.example.csv
+PYTHONPATH=src python -m letsquant.cli fills replay --fills configs/fills.example.csv --initial-cash 100000
 ```
 
 ## 开发环境
@@ -142,6 +143,7 @@ make PYTHON=.conda/envs/letsquant/bin/python real-smoke REAL_LIMIT=20 REAL_START
 - `validation_metrics.json`：`validate` 命令按 `--split-date` 输出样本内、样本外和稳健性摘要；两段明细分别写入 `in_sample/` 和 `out_sample/`。
 - `trades.csv`：实际成交记录。
 - `fill_reconciliation.csv`：`fills reconcile` 命令比较计划订单和真实成交，标记 `filled`、`partial`、`not_filled`、`overfilled`、`unplanned`，并计算股数差异、成交均价、滑点和费用。
+- `fill_replay/positions.csv` 和 `fill_replay/summary.csv`：`fills replay` 命令用真实成交回放现金、持仓均价和已实现盈亏。
 - `order_rejections.csv`：因停牌、涨停买入、跌停卖出等约束未成交的信号。
 - `signals.csv`：历史信号记录。
 - `equity_curve.csv`：每日权益曲线。
@@ -209,6 +211,11 @@ PYTHONPATH=src python -m letsquant.cli fills reconcile \
   --orders results/manual_orders.csv \
   --fills configs/fills.example.csv \
   --output results/fill_reconciliation.csv
+
+PYTHONPATH=src python -m letsquant.cli fills replay \
+  --fills configs/fills.example.csv \
+  --initial-cash 100000 \
+  --output-dir results/fill_replay
 ```
 
 `fills.csv` 字段：
@@ -218,6 +225,8 @@ PYTHONPATH=src python -m letsquant.cli fills reconcile \
 - `symbol`、`action`、`shares`、`price`：成交股票、方向、股数和价格。
 - `commission`、`stamp_tax`、`transfer_fee`：实际费用，可填 0。
 - `note`：可选备注。
+
+`fills replay` 会按成交日期排序回放成交，买入增加持仓并更新平均成本，卖出减少持仓并计算已实现盈亏；如果卖出股数超过当前持仓，会直接报错。
 
 ## 风控默认值
 
