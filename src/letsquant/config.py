@@ -38,6 +38,12 @@ class StrategyConfig:
 
 
 @dataclass(frozen=True)
+class BenchmarkConfig:
+    symbol: str
+    data_dir: Path
+
+
+@dataclass(frozen=True)
 class AppConfig:
     initial_cash: float
     data: DataConfig
@@ -45,6 +51,7 @@ class AppConfig:
     risk: RiskConfig
     costs: CostConfig
     output_dir: Path
+    benchmark: Optional[BenchmarkConfig] = None
 
 
 def parse_date(value: Optional[str]) -> Optional[date]:
@@ -65,6 +72,16 @@ def load_config(path: str) -> AppConfig:
     strategy_raw = raw["strategy"]
     risk_raw = raw.get("risk", {})
     costs_raw = raw.get("costs", {})
+    benchmark_raw = raw.get("benchmark")
+    benchmark = None
+    if benchmark_raw:
+        symbol = str(benchmark_raw.get("symbol", "")).strip()
+        if not symbol:
+            raise ValueError("benchmark.symbol is required when benchmark is configured")
+        benchmark = BenchmarkConfig(
+            symbol=symbol,
+            data_dir=Path(benchmark_raw.get("data_dir", "data/index_daily")),
+        )
 
     return AppConfig(
         initial_cash=float(raw.get("initial_cash", 100000)),
@@ -93,4 +110,5 @@ def load_config(path: str) -> AppConfig:
             slippage_bps=float(costs_raw.get("slippage_bps", 5)),
         ),
         output_dir=Path(raw.get("output_dir", "results")),
+        benchmark=benchmark,
     )

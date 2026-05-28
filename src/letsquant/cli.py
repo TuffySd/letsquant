@@ -7,7 +7,8 @@ from datetime import date
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-from letsquant.config import AppConfig, load_config, parse_date
+from letsquant.benchmark import build_benchmark_metrics
+from letsquant.config import AppConfig, BenchmarkConfig, load_config, parse_date
 from letsquant.data import CsvBarSource
 from letsquant.data.adjusted_price import build_adjusted_daily_csv
 from letsquant.data.tushare_source import TushareDailySource, default_probe_cases
@@ -19,7 +20,7 @@ from letsquant.data.universe import (
 )
 from letsquant.execution import Backtester
 from letsquant.execution.instructions import build_manual_orders
-from letsquant.models import Action, Bar, Position, Signal
+from letsquant.models import Action, Bar, PortfolioSnapshot, Position, Signal
 from letsquant.reports import (
     ensure_output_dir,
     write_equity_curve,
@@ -170,6 +171,8 @@ def run_backtest(config: AppConfig) -> None:
     strategy = build_strategy(config.strategy.name, config.strategy.params)
     backtester = Backtester(strategy, config.initial_cash, config.risk, config.costs)
     result = backtester.run(bars_by_symbol)
+    if config.benchmark is not None:
+        result.metrics.update(load_benchmark_metrics(config, result.snapshots, result.metrics))
 
     output_dir = ensure_output_dir(config.output_dir)
     write_metrics(output_dir / "metrics.json", result.metrics)
@@ -240,6 +243,8 @@ def add_data_override_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--end-date", help="inclusive end date overriding config.data.end_date")
     parser.add_argument("--output-dir", help="output directory overriding config output_dir")
     parser.add_argument("--limit", type=int, help="limit number of symbols after parsing inputs")
+    parser.add_argument("--benchmark-symbol", help="benchmark CSV symbol, e.g. 000300.SH")
+    parser.add_argument("--benchmark-dir", help="benchmark CSV directory, e.g. data/index_daily")
 
 
 def apply_data_overrides(config: AppConfig, args: argparse.Namespace) -> AppConfig:
@@ -259,7 +264,48 @@ def apply_data_overrides(config: AppConfig, args: argparse.Namespace) -> AppConf
         data = replace(data, end_date=end_date)
 
     output_dir = Path(args.output_dir) if getattr(args, "output_dir", None) else config.output_dir
-    return replace(config, data=data, output_dir=output_dir)
+    benchmark = apply_benchmark_overrides(config.benchmark, args)
+    return replace(config, data=data, output_dir=output_dir, benchmark=benchmark)
+
+
+def apply_benchmark_overrides(
+    benchmark: Optional[BenchmarkConfig],
+    args: argparse.Namespace,
+) -> Optional[BenchmarkConfig]:
+    symbol = getattr(args, "benchmark_symbol", None)
+    data_dir = getattr(args, "benchmark_dir", None)
+    if not symbol and not data_dir:
+        return benchmark
+    if benchmark is None:
+        if not symbol:
+            raise ValueError("benchmark-symbol is required when enabling benchmark from CLI")
+        benchmark = BenchmarkConfig(symbol=symbol, data_dir=Path(data_dir or "data/index_daily"))
+    if symbol:
+        benchmark = replace(benchmark, symbol=symbol)
+    if data_dir:
+        benchmark = replace(benchmark, data_dir=Path(data_dir))
+    return benchmark
+
+
+def load_benchmark_metrics(
+    config: AppConfig,
+    snapshots: List[PortfolioSnapshot],
+    strategy_metrics: Dict[str, float],
+) -> Dict[str, float]:
+    if config.benchmark is None:
+        return {}
+    benchmark_source = CsvBarSource(config.benchmark.data_dir)
+    benchmark_bars = benchmark_source.load_bars(
+        [config.benchmark.symbol],
+        start_date=config.data.start_date,
+        end_date=config.data.end_date,
+    )
+    bars = benchmark_bars.get(config.benchmark.symbol, [])
+    if not bars:
+        raise ValueError(
+            f"no benchmark data loaded for {config.benchmark.symbol} from {config.benchmark.data_dir}"
+        )
+    return build_benchmark_metrics(bars, snapshots, strategy_metrics)
 
 
 def run_data_sync(args: argparse.Namespace) -> None:

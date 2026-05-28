@@ -94,6 +94,8 @@ PYTHONPATH=src python -m letsquant.cli backtest \
   --symbols-file data/universe/default.csv \
   --limit 50 \
   --data-dir data/qfq_daily \
+  --benchmark-symbol 000300.SH \
+  --benchmark-dir data/index_daily \
   --output-dir results/real_backtest
 
 PYTHONPATH=src python -m letsquant.cli signal \
@@ -126,6 +128,7 @@ make PYTHON=.conda/envs/letsquant/bin/python real-smoke REAL_LIMIT=20 REAL_START
 回测结果默认输出到 `results/`：
 
 - `metrics.json`：收益、回撤、夏普、交易次数等指标。
+- 真实配置默认从 `data/index_daily/000300.SH.csv` 读取沪深 300 基准，`metrics.json` 会追加 `benchmark_total_return`、`benchmark_max_drawdown`、`excess_total_return` 等对比指标。
 - `trades.csv`：实际成交记录。
 - `order_rejections.csv`：因停牌、涨停买入、跌停卖出等约束未成交的信号。
 - `signals.csv`：历史信号记录。
