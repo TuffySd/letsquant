@@ -65,6 +65,21 @@ class FillReplayResult:
     realized_pnl: float
 
 
+@dataclass(frozen=True)
+class TrackingDiff:
+    symbol: str
+    planned_net_shares: int
+    actual_net_shares: int
+    share_diff: int
+    planned_cash_flow: float
+    actual_cash_flow: float
+    cash_flow_diff: float
+    planned_abs_value: float
+    actual_abs_value: float
+    actual_total_costs: float
+    status: str
+
+
 def read_manual_orders(path: Path) -> List[ManualOrder]:
     with path.open("r", encoding="utf-8-sig", newline="") as fh:
         return [_manual_order_from_row(row) for row in csv.DictReader(fh)]
@@ -213,6 +228,91 @@ def write_replay_summary(path: Path, result: FillReplayResult) -> None:
         )
 
 
+def build_tracking_diff(
+    orders: Iterable[ManualOrder],
+    fills: Iterable[Fill],
+) -> List[TrackingDiff]:
+    planned: Dict[str, Dict[str, float]] = {}
+    actual: Dict[str, Dict[str, float]] = {}
+    for order in orders:
+        bucket = planned.setdefault(order.symbol, _empty_tracking_bucket())
+        signed_shares = _signed_shares(order.action, order.shares)
+        cash_flow = _planned_cash_flow(order)
+        bucket["net_shares"] += signed_shares
+        bucket["cash_flow"] += cash_flow
+        bucket["abs_value"] += abs(order.shares * order.reference_price)
+
+    for fill in fills:
+        bucket = actual.setdefault(fill.symbol, _empty_tracking_bucket())
+        signed_shares = _signed_shares(fill.action, fill.shares)
+        cash_flow = _actual_cash_flow(fill)
+        bucket["net_shares"] += signed_shares
+        bucket["cash_flow"] += cash_flow
+        bucket["abs_value"] += abs(fill.gross_value)
+        bucket["costs"] += fill.total_costs
+
+    rows: List[TrackingDiff] = []
+    for symbol in sorted(set(planned) | set(actual)):
+        plan = planned.get(symbol, _empty_tracking_bucket())
+        act = actual.get(symbol, _empty_tracking_bucket())
+        planned_net_shares = int(plan["net_shares"])
+        actual_net_shares = int(act["net_shares"])
+        share_diff = actual_net_shares - planned_net_shares
+        cash_flow_diff = act["cash_flow"] - plan["cash_flow"]
+        rows.append(
+            TrackingDiff(
+                symbol=symbol,
+                planned_net_shares=planned_net_shares,
+                actual_net_shares=actual_net_shares,
+                share_diff=share_diff,
+                planned_cash_flow=plan["cash_flow"],
+                actual_cash_flow=act["cash_flow"],
+                cash_flow_diff=cash_flow_diff,
+                planned_abs_value=plan["abs_value"],
+                actual_abs_value=act["abs_value"],
+                actual_total_costs=act["costs"],
+                status=_tracking_status(plan["abs_value"], act["abs_value"], share_diff, cash_flow_diff),
+            )
+        )
+    return rows
+
+
+def write_tracking_diff(path: Path, rows: Iterable[TrackingDiff]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fieldnames = [
+        "symbol",
+        "status",
+        "planned_net_shares",
+        "actual_net_shares",
+        "share_diff",
+        "planned_cash_flow",
+        "actual_cash_flow",
+        "cash_flow_diff",
+        "planned_abs_value",
+        "actual_abs_value",
+        "actual_total_costs",
+    ]
+    with path.open("w", encoding="utf-8", newline="") as fh:
+        writer = csv.DictWriter(fh, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow(
+                {
+                    "symbol": row.symbol,
+                    "status": row.status,
+                    "planned_net_shares": row.planned_net_shares,
+                    "actual_net_shares": row.actual_net_shares,
+                    "share_diff": row.share_diff,
+                    "planned_cash_flow": f"{row.planned_cash_flow:.2f}",
+                    "actual_cash_flow": f"{row.actual_cash_flow:.2f}",
+                    "cash_flow_diff": f"{row.cash_flow_diff:.2f}",
+                    "planned_abs_value": f"{row.planned_abs_value:.2f}",
+                    "actual_abs_value": f"{row.actual_abs_value:.2f}",
+                    "actual_total_costs": f"{row.actual_total_costs:.2f}",
+                }
+            )
+
+
 def _manual_order_from_row(row: Dict[str, str]) -> ManualOrder:
     signal_date = parse_date(row.get("signal_date"))
     if signal_date is None:
@@ -264,6 +364,47 @@ def _apply_buy(position: ReplayPosition | None, fill: Fill) -> ReplayPosition:
         avg_cost=total_cost / total_shares,
         realized_pnl=position.realized_pnl,
     )
+
+
+def _empty_tracking_bucket() -> Dict[str, float]:
+    return {"net_shares": 0.0, "cash_flow": 0.0, "abs_value": 0.0, "costs": 0.0}
+
+
+def _signed_shares(action: Action, shares: int) -> int:
+    return shares if action == Action.BUY else -shares
+
+
+def _planned_cash_flow(order: ManualOrder) -> float:
+    value = order.shares * order.reference_price
+    if order.action == Action.BUY:
+        return -value
+    if order.action == Action.SELL:
+        return value
+    return 0.0
+
+
+def _actual_cash_flow(fill: Fill) -> float:
+    if fill.action == Action.BUY:
+        return -(fill.gross_value + fill.total_costs)
+    if fill.action == Action.SELL:
+        return fill.gross_value - fill.total_costs
+    return 0.0
+
+
+def _tracking_status(
+    planned_abs_value: float,
+    actual_abs_value: float,
+    share_diff: int,
+    cash_flow_diff: float,
+) -> str:
+    tolerance = 0.01
+    if planned_abs_value <= 0 and actual_abs_value > 0:
+        return "unplanned"
+    if planned_abs_value > 0 and actual_abs_value <= 0:
+        return "not_filled"
+    if share_diff == 0 and abs(cash_flow_diff) <= tolerance:
+        return "matched"
+    return "drift"
 
 
 def _reconcile_order(order: ManualOrder, fills: List[Fill]) -> FillReconciliation:

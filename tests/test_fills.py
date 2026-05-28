@@ -6,11 +6,13 @@ from pathlib import Path
 
 from letsquant.execution.fills import (
     Fill,
+    build_tracking_diff,
     reconcile_fills,
     replay_fills,
     write_fill_reconciliation,
     write_replay_positions,
     write_replay_summary,
+    write_tracking_diff,
 )
 from letsquant.models import Action, ManualOrder
 
@@ -102,6 +104,42 @@ class FillReconciliationTests(unittest.TestCase):
         self.assertEqual(positions[0]["symbol"], "000001.SZ")
         self.assertEqual(positions[0]["shares"], "100")
         self.assertEqual(summary[0]["cash"], "9000.00")
+
+    def test_build_tracking_diff_summarizes_plan_vs_actual(self) -> None:
+        orders = [
+            ManualOrder(date(2024, 1, 2), "000001.SZ", Action.BUY, 1000, 10.0, 10000, "entry", ""),
+            ManualOrder(date(2024, 1, 2), "600000.SH", Action.SELL, 500, 8.0, 4000, "exit", ""),
+        ]
+        fills = [
+            Fill(date(2024, 1, 3), date(2024, 1, 2), "000001.SZ", Action.BUY, 800, 10.1, commission=5),
+            Fill(date(2024, 1, 3), date(2024, 1, 2), "300001.SZ", Action.BUY, 100, 20.0),
+        ]
+
+        rows = build_tracking_diff(orders, fills)
+
+        by_symbol = {row.symbol: row for row in rows}
+        self.assertEqual(by_symbol["000001.SZ"].status, "drift")
+        self.assertEqual(by_symbol["000001.SZ"].planned_net_shares, 1000)
+        self.assertEqual(by_symbol["000001.SZ"].actual_net_shares, 800)
+        self.assertEqual(by_symbol["000001.SZ"].share_diff, -200)
+        self.assertAlmostEqual(by_symbol["000001.SZ"].cash_flow_diff, 1915)
+        self.assertEqual(by_symbol["600000.SH"].status, "not_filled")
+        self.assertEqual(by_symbol["300001.SZ"].status, "unplanned")
+
+    def test_write_tracking_diff_csv(self) -> None:
+        rows = build_tracking_diff(
+            [ManualOrder(date(2024, 1, 2), "000001.SZ", Action.BUY, 100, 10.0, 1000, "entry", "")],
+            [Fill(date(2024, 1, 3), date(2024, 1, 2), "000001.SZ", Action.BUY, 100, 10.0)],
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "tracking_diff.csv"
+            write_tracking_diff(path, rows)
+
+            with path.open("r", encoding="utf-8", newline="") as fh:
+                written = list(csv.DictReader(fh))
+
+        self.assertEqual(written[0]["status"], "matched")
+        self.assertEqual(written[0]["share_diff"], "0")
 
 
 if __name__ == "__main__":

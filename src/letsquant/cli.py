@@ -20,6 +20,7 @@ from letsquant.data.universe import (
 )
 from letsquant.execution import BacktestResult, Backtester
 from letsquant.execution.fills import (
+    build_tracking_diff,
     read_fills,
     read_manual_orders,
     reconcile_fills,
@@ -27,6 +28,7 @@ from letsquant.execution.fills import (
     write_fill_reconciliation,
     write_replay_positions,
     write_replay_summary,
+    write_tracking_diff,
 )
 from letsquant.execution.instructions import build_manual_orders
 from letsquant.models import Action, Bar, PortfolioSnapshot, Position, Signal
@@ -74,6 +76,10 @@ def main() -> None:
     replay_parser.add_argument("--fills", required=True, help="actual fills CSV path")
     replay_parser.add_argument("--initial-cash", type=float, required=True, help="starting cash before fills")
     replay_parser.add_argument("--output-dir", default="results/fill_replay", help="output directory")
+    track_parser = fills_subparsers.add_parser("track", help="summarize planned order vs actual fill drift")
+    track_parser.add_argument("--orders", required=True, help="manual_orders.csv path")
+    track_parser.add_argument("--fills", required=True, help="actual fills CSV path")
+    track_parser.add_argument("--output", default="results/tracking_diff.csv", help="output tracking diff CSV path")
 
     data_parser = subparsers.add_parser("data", help="data maintenance commands")
     data_subparsers = data_parser.add_subparsers(dest="data_command", required=True)
@@ -193,6 +199,8 @@ def main() -> None:
             run_fill_reconciliation(args)
         elif args.command == "fills" and args.fills_command == "replay":
             run_fill_replay(args)
+        elif args.command == "fills" and args.fills_command == "track":
+            run_fill_tracking(args)
         elif args.command == "data" and args.data_command == "sync":
             run_data_sync(args)
         elif args.command == "data" and args.data_command == "probe":
@@ -363,6 +371,20 @@ def run_fill_replay(args: argparse.Namespace) -> None:
             indent=2,
         )
     )
+
+
+def run_fill_tracking(args: argparse.Namespace) -> None:
+    rows = build_tracking_diff(
+        read_manual_orders(Path(args.orders)),
+        read_fills(Path(args.fills)),
+    )
+    output_path = Path(args.output)
+    write_tracking_diff(output_path, rows)
+    status_counts: Dict[str, int] = {}
+    for row in rows:
+        status_counts[row.status] = status_counts.get(row.status, 0) + 1
+    print(f"Fill tracking complete. Output: {output_path}")
+    print(json.dumps(status_counts, ensure_ascii=False, indent=2))
 
 
 def load_bars(config: AppConfig) -> Dict[str, List[Bar]]:
