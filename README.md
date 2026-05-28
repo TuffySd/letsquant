@@ -105,6 +105,24 @@ PYTHONPATH=src python -m letsquant.cli signal \
   --output-dir results/real_signal
 ```
 
+跑一个最小真实数据 smoke：
+
+```bash
+make PYTHON=.conda/envs/letsquant/bin/python real-smoke
+```
+
+该命令复用本地 `data/stocks/stock_basic.csv`。如果需要刷新股票基础信息，先单独运行：
+
+```bash
+make PYTHON=.conda/envs/letsquant/bin/python real-refresh-stock-basic
+```
+
+`real-smoke` 默认只跑 `REAL_LIMIT=5`、`REAL_START=2024-01-02` 到 `REAL_END=2024-01-05`，用于验证端到端流程。扩大范围时可以覆盖变量，例如：
+
+```bash
+make PYTHON=.conda/envs/letsquant/bin/python real-smoke REAL_LIMIT=20 REAL_START=2023-01-01 REAL_END=2024-12-31
+```
+
 回测结果默认输出到 `results/`：
 
 - `metrics.json`：收益、回撤、夏普、交易次数等指标。
@@ -113,7 +131,7 @@ PYTHONPATH=src python -m letsquant.cli signal \
 - `signals.csv`：历史信号记录。
 - `equity_curve.csv`：每日权益曲线。
 - `current_signals.csv`：当前最新收盘后的待确认人工指令。
-- `manual_orders.csv`：包含建议股数和参考价格的人工下单清单。
+- `manual_orders.csv`：包含建议股数、参考价格和人工复核备注的下单清单；备注会标出最新行情日是否停牌、是否收在涨跌停，并提示复核公告、新闻和财报日程。
 
 Tushare 扩展缓存目录：
 
