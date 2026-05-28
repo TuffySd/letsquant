@@ -1,0 +1,2 @@
+signal_date,trade_date,symbol,action,shares,price,commission,stamp_tax,transfer_fee,note
+2024-02-01,2024-02-02,000001.SZ,BUY,1000,10.1200,5.00,0.00,0.10,example actual fill

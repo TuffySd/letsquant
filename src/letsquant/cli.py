@@ -19,6 +19,7 @@ from letsquant.data.universe import (
     parse_exchange_set,
 )
 from letsquant.execution import BacktestResult, Backtester
+from letsquant.execution.fills import read_fills, read_manual_orders, reconcile_fills, write_fill_reconciliation
 from letsquant.execution.instructions import build_manual_orders
 from letsquant.models import Action, Bar, PortfolioSnapshot, Position, Signal
 from letsquant.reports import (
@@ -50,6 +51,17 @@ def main() -> None:
     signal_parser.add_argument("--config", required=True, help="path to JSON config")
     signal_parser.add_argument("--portfolio", help="optional live portfolio JSON")
     add_data_override_args(signal_parser)
+
+    fills_parser = subparsers.add_parser("fills", help="actual fill reconciliation commands")
+    fills_subparsers = fills_parser.add_subparsers(dest="fills_command", required=True)
+    reconcile_parser = fills_subparsers.add_parser("reconcile", help="compare manual orders with actual fills")
+    reconcile_parser.add_argument("--orders", required=True, help="manual_orders.csv path")
+    reconcile_parser.add_argument("--fills", required=True, help="actual fills CSV path")
+    reconcile_parser.add_argument(
+        "--output",
+        default="results/fill_reconciliation.csv",
+        help="output reconciliation CSV path",
+    )
 
     data_parser = subparsers.add_parser("data", help="data maintenance commands")
     data_subparsers = data_parser.add_subparsers(dest="data_command", required=True)
@@ -165,6 +177,8 @@ def main() -> None:
             config = load_config(args.config)
             config = apply_data_overrides(config, args)
             run_signal(config, args.portfolio)
+        elif args.command == "fills" and args.fills_command == "reconcile":
+            run_fill_reconciliation(args)
         elif args.command == "data" and args.data_command == "sync":
             run_data_sync(args)
         elif args.command == "data" and args.data_command == "probe":
@@ -300,6 +314,20 @@ def run_signal(config: AppConfig, portfolio_path: Optional[str]) -> None:
         )
     if not orders:
         print("No actionable signals.")
+
+
+def run_fill_reconciliation(args: argparse.Namespace) -> None:
+    rows = reconcile_fills(
+        read_manual_orders(Path(args.orders)),
+        read_fills(Path(args.fills)),
+    )
+    output_path = Path(args.output)
+    write_fill_reconciliation(output_path, rows)
+    status_counts: Dict[str, int] = {}
+    for row in rows:
+        status_counts[row.status] = status_counts.get(row.status, 0) + 1
+    print(f"Fill reconciliation complete. Output: {output_path}")
+    print(json.dumps(status_counts, ensure_ascii=False, indent=2))
 
 
 def load_bars(config: AppConfig) -> Dict[str, List[Bar]]:
