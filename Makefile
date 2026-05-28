@@ -7,13 +7,16 @@ REAL_REQUEST_INTERVAL ?= 0.5
 REAL_UNIVERSE ?= data/universe/smoke.csv
 REAL_OUTPUT ?= results/real_smoke
 
-.PHONY: test backtest signal compile real-refresh-stock-basic real-smoke
+.PHONY: test backtest validate signal compile real-refresh-stock-basic real-smoke
 
 test:
 	PYTHONPATH=$(SRC_PATH) $(PYTHON) -m unittest discover -s tests
 
 backtest:
 	PYTHONPATH=$(SRC_PATH) $(PYTHON) -m letsquant.cli backtest --config configs/sample_backtest.json
+
+validate:
+	PYTHONPATH=$(SRC_PATH) $(PYTHON) -m letsquant.cli validate --config configs/sample_backtest.json --split-date 2024-02-15 --output-dir results/validation_sample
 
 signal:
 	PYTHONPATH=$(SRC_PATH) $(PYTHON) -m letsquant.cli signal --config configs/sample_backtest.json --portfolio configs/live_portfolio.example.json

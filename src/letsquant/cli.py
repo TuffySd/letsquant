@@ -3,9 +3,9 @@ import json
 import os
 import sys
 from dataclasses import replace
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from letsquant.benchmark import build_benchmark_metrics
 from letsquant.config import AppConfig, BenchmarkConfig, load_config, parse_date
@@ -18,7 +18,7 @@ from letsquant.data.universe import (
     parse_csv_set,
     parse_exchange_set,
 )
-from letsquant.execution import Backtester
+from letsquant.execution import BacktestResult, Backtester
 from letsquant.execution.instructions import build_manual_orders
 from letsquant.models import Action, Bar, PortfolioSnapshot, Position, Signal
 from letsquant.reports import (
@@ -40,6 +40,11 @@ def main() -> None:
     backtest_parser = subparsers.add_parser("backtest", help="run historical backtest")
     backtest_parser.add_argument("--config", required=True, help="path to JSON config")
     add_data_override_args(backtest_parser)
+
+    validate_parser = subparsers.add_parser("validate", help="run in-sample and out-of-sample backtests")
+    validate_parser.add_argument("--config", required=True, help="path to JSON config")
+    validate_parser.add_argument("--split-date", required=True, help="last in-sample date, YYYY-MM-DD or YYYYMMDD")
+    add_data_override_args(validate_parser)
 
     signal_parser = subparsers.add_parser("signal", help="generate latest manual trade signals")
     signal_parser.add_argument("--config", required=True, help="path to JSON config")
@@ -149,6 +154,13 @@ def main() -> None:
             config = load_config(args.config)
             config = apply_data_overrides(config, args)
             run_backtest(config)
+        elif args.command == "validate":
+            config = load_config(args.config)
+            config = apply_data_overrides(config, args)
+            split_date = parse_date(args.split_date)
+            if split_date is None:
+                raise ValueError("split-date is required")
+            run_validation(config, split_date)
         elif args.command == "signal":
             config = load_config(args.config)
             config = apply_data_overrides(config, args)
@@ -167,22 +179,93 @@ def main() -> None:
 
 
 def run_backtest(config: AppConfig) -> None:
+    result = run_backtest_result(config)
+    write_backtest_outputs(config.output_dir, result)
+
+    print(f"Backtest complete. Output: {config.output_dir}")
+    print(json.dumps(result.metrics, ensure_ascii=False, indent=2))
+
+
+def run_backtest_result(config: AppConfig) -> BacktestResult:
     bars_by_symbol = load_bars(config)
     strategy = build_strategy(config.strategy.name, config.strategy.params)
     backtester = Backtester(strategy, config.initial_cash, config.risk, config.costs)
     result = backtester.run(bars_by_symbol)
     if config.benchmark is not None:
         result.metrics.update(load_benchmark_metrics(config, result.snapshots, result.metrics))
+    return result
 
-    output_dir = ensure_output_dir(config.output_dir)
+
+def write_backtest_outputs(output_dir: Path, result: BacktestResult) -> None:
+    output_dir = ensure_output_dir(output_dir)
     write_metrics(output_dir / "metrics.json", result.metrics)
     write_trades(output_dir / "trades.csv", result.trades)
     write_order_rejections(output_dir / "order_rejections.csv", result.order_rejections)
     write_signals(output_dir / "signals.csv", result.signals)
     write_equity_curve(output_dir / "equity_curve.csv", result.snapshots)
 
-    print(f"Backtest complete. Output: {output_dir}")
-    print(json.dumps(result.metrics, ensure_ascii=False, indent=2))
+
+def run_validation(config: AppConfig, split_date: date) -> None:
+    validate_split_date(config, split_date)
+    out_start = split_date + timedelta(days=1)
+    base_output = config.output_dir
+    in_config = replace(
+        config,
+        data=replace(config.data, end_date=split_date),
+        output_dir=base_output / "in_sample",
+    )
+    out_config = replace(
+        config,
+        data=replace(config.data, start_date=out_start),
+        output_dir=base_output / "out_sample",
+    )
+
+    in_result = run_backtest_result(in_config)
+    out_result = run_backtest_result(out_config)
+    write_backtest_outputs(in_config.output_dir, in_result)
+    write_backtest_outputs(out_config.output_dir, out_result)
+
+    report = build_validation_report(config, split_date, in_result, out_result)
+    output_dir = ensure_output_dir(base_output)
+    with (output_dir / "validation_metrics.json").open("w", encoding="utf-8") as fh:
+        json.dump(report, fh, ensure_ascii=False, indent=2)
+
+    print(f"Validation complete. Output: {output_dir / 'validation_metrics.json'}")
+    print(json.dumps(report, ensure_ascii=False, indent=2))
+
+
+def validate_split_date(config: AppConfig, split_date: date) -> None:
+    if config.data.start_date is not None and split_date <= config.data.start_date:
+        raise ValueError("split-date must be later than config/data start-date")
+    if config.data.end_date is not None and split_date >= config.data.end_date:
+        raise ValueError("split-date must be earlier than config/data end-date")
+
+
+def build_validation_report(
+    config: AppConfig,
+    split_date: date,
+    in_result: BacktestResult,
+    out_result: BacktestResult,
+) -> Dict[str, Any]:
+    return {
+        "split_date": split_date.isoformat(),
+        "in_sample": {
+            "start_date": config.data.start_date.isoformat() if config.data.start_date else "",
+            "end_date": split_date.isoformat(),
+            "metrics": in_result.metrics,
+        },
+        "out_sample": {
+            "start_date": (split_date + timedelta(days=1)).isoformat(),
+            "end_date": config.data.end_date.isoformat() if config.data.end_date else "",
+            "metrics": out_result.metrics,
+        },
+        "robustness": {
+            "out_sample_total_return_minus_in_sample": out_result.metrics.get("total_return", 0.0)
+            - in_result.metrics.get("total_return", 0.0),
+            "out_sample_excess_return": out_result.metrics.get("excess_total_return", 0.0),
+            "out_sample_trade_count": out_result.metrics.get("trade_count", 0.0),
+        },
+    }
 
 
 def run_signal(config: AppConfig, portfolio_path: Optional[str]) -> None:
