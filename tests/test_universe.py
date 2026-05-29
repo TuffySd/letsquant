@@ -83,6 +83,37 @@ class UniverseTests(unittest.TestCase):
             self.assertEqual(result.symbols, ["000001.SZ"])
             self.assertEqual(result.excluded_count, 1)
 
+    def test_build_universe_sorts_by_average_amount_before_limit(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            stock_basic = root / "stock_basic.csv"
+            stock_basic.write_text(
+                "ts_code,symbol,name,area,industry,list_date\n"
+                "000001.SZ,000001,平安银行,深圳,银行,19910403\n"
+                "000002.SZ,000002,万科A,深圳,地产,19910129\n"
+                "600000.SH,600000,浦发银行,上海,银行,19991110\n",
+                encoding="utf-8",
+            )
+            self._write_daily(root / "daily" / "000001.SZ.csv", [10000000, 12000000, 14000000])
+            self._write_daily(root / "daily" / "000002.SZ.csv", [30000000, 32000000, 34000000])
+            self._write_daily(root / "daily" / "600000.SH.csv", [20000000, 22000000, 24000000])
+
+            result = build_universe_csv(
+                stock_basic_path=stock_basic,
+                output_path=root / "universe.csv",
+                filters=UniverseFilters(
+                    as_of_date=date(2024, 1, 5),
+                    daily_dir=root / "daily",
+                    liquidity_window=2,
+                    sort_by="avg_amount",
+                    limit=2,
+                ),
+            )
+
+            self.assertEqual(result.symbols, ["000002.SZ", "600000.SH"])
+            rows = self._read_rows(result.path)
+            self.assertEqual(rows[0]["avg_amount"], "33000000.00")
+
     def test_build_universe_limits_selected_symbols(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

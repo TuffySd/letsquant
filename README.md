@@ -164,6 +164,16 @@ make PYTHON=.conda/envs/letsquant/bin/python real-mvp \
 
 真实接口默认 `MVP_REQUEST_RETRIES=3`、`MVP_RETRY_BACKOFF=1.0`，用于处理偶发 SSL 或代理连接抖动。
 
+生成并验证流动性 Top 50 股票池：
+
+```bash
+make PYTHON=.conda/envs/letsquant/bin/python real-mvp-liquid \
+  MVP_LIMIT=50 \
+  MVP_CANDIDATE_LIMIT=150
+```
+
+该目标会先同步 `MVP_CANDIDATE_LIMIT` 只候选股，再按最近 `MVP_LIQUIDITY_WINDOW=60` 根日线的平均成交额排序，输出 `data/universe/mvp50_liquid.csv`，并跑复权、回测、样本验证和信号生成。输出位于 `results/real_mvp50_liquid/`。
+
 交易日后，有真实成交文件时继续跑：
 
 ```bash

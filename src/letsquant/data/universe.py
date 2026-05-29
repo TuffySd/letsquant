@@ -26,6 +26,7 @@ class UniverseFilters:
     daily_dir: Optional[Path] = None
     liquidity_window: int = 20
     min_avg_amount: Optional[float] = None
+    sort_by: str = "code"
     limit: Optional[int] = None
 
 
@@ -43,7 +44,7 @@ def build_universe_csv(
         else:
             excluded_count += 1
 
-    selected.sort(key=lambda row: str(row.get("ts_code", "")))
+    _sort_selected(selected, filters.sort_by)
     if filters.limit is not None:
         if filters.limit <= 0:
             raise ValueError("limit must be positive")
@@ -79,18 +80,31 @@ def _include_stock(row: dict[str, str], filters: UniverseFilters) -> bool:
     if listed_days < filters.min_listed_days:
         return False
 
-    if filters.min_avg_amount is not None:
+    if filters.min_avg_amount is not None or filters.sort_by == "avg_amount":
         if filters.daily_dir is None:
-            raise ValueError("daily_dir is required when min_avg_amount is set")
+            raise ValueError("daily_dir is required when liquidity filtering or sorting is enabled")
         avg_amount = _average_amount(
             filters.daily_dir / f"{ts_code}.csv",
             filters.as_of_date,
             filters.liquidity_window,
         )
-        if avg_amount is None or avg_amount < filters.min_avg_amount:
+        if avg_amount is None:
+            return False
+        row["avg_amount"] = f"{avg_amount:.2f}"
+        if filters.min_avg_amount is not None and avg_amount < filters.min_avg_amount:
             return False
 
     return True
+
+
+def _sort_selected(rows: List[dict[str, str]], sort_by: str) -> None:
+    if sort_by == "code":
+        rows.sort(key=lambda row: str(row.get("ts_code", "")))
+        return
+    if sort_by == "avg_amount":
+        rows.sort(key=lambda row: (-float(row.get("avg_amount") or 0), str(row.get("ts_code", ""))))
+        return
+    raise ValueError(f"unsupported universe sort: {sort_by}")
 
 
 def _exchange_from_ts_code(ts_code: str) -> str:

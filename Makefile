@@ -17,11 +17,17 @@ MVP_REQUEST_RETRIES ?= 3
 MVP_RETRY_BACKOFF ?= 1.0
 MVP_UNIVERSE ?= data/universe/mvp20.csv
 MVP_OUTPUT ?= results/real_mvp
+MVP_LIQUID_UNIVERSE ?= data/universe/mvp50_liquid.csv
+MVP_LIQUID_OUTPUT ?= results/real_mvp50_liquid
+MVP_CANDIDATE_UNIVERSE ?= data/universe/mvp_candidates.csv
+MVP_CANDIDATE_LIMIT ?= 150
+MVP_LIQUIDITY_WINDOW ?= 60
+MVP_LIQUID_MIN_AVG_AMOUNT ?= 0
 MVP_INDEX_SYMBOLS ?= 000300.SH
 MVP_INITIAL_CASH ?= 100000
 MVP_FILLS ?= configs/fills.example.csv
 
-.PHONY: test backtest validate signal compile real-check-env real-refresh-stock-basic real-smoke real-mvp real-mvp-fills
+.PHONY: test backtest validate signal compile real-check-env real-refresh-stock-basic real-smoke real-mvp real-mvp-liquid real-mvp-fills
 
 test:
 	PYTHONPATH=$(SRC_PATH) $(PYTHON) -m unittest discover -s tests
@@ -59,6 +65,15 @@ real-mvp: real-check-env
 	PYTHONPATH=$(SRC_PATH) $(PYTHON) -m letsquant.cli backtest --config configs/a_share_midterm.json --symbols-file $(MVP_UNIVERSE) --limit $(MVP_LIMIT) --data-dir data/qfq_daily --start-date $(MVP_START) --end-date $(MVP_END) --output-dir $(MVP_OUTPUT)/backtest
 	PYTHONPATH=$(SRC_PATH) $(PYTHON) -m letsquant.cli validate --config configs/a_share_midterm.json --symbols-file $(MVP_UNIVERSE) --limit $(MVP_LIMIT) --data-dir data/qfq_daily --start-date $(MVP_START) --end-date $(MVP_END) --split-date $(MVP_SPLIT) --output-dir $(MVP_OUTPUT)/validation
 	PYTHONPATH=$(SRC_PATH) $(PYTHON) -m letsquant.cli signal --config configs/a_share_midterm.json --symbols-file $(MVP_UNIVERSE) --limit $(MVP_LIMIT) --data-dir data/qfq_daily --start-date $(MVP_START) --end-date $(MVP_END) --output-dir $(MVP_OUTPUT)/signal --portfolio configs/live_portfolio.example.json
+
+real-mvp-liquid:
+	PYTHONPATH=$(SRC_PATH) $(PYTHON) -m letsquant.cli data universe --stock-basic data/stocks/stock_basic.csv --output $(MVP_CANDIDATE_UNIVERSE) --as-of-date $(MVP_END) --min-listed-days 180 --limit $(MVP_CANDIDATE_LIMIT)
+	PYTHONPATH=$(SRC_PATH) $(PYTHON) -m letsquant.cli data sync --provider tushare --symbols-file $(MVP_CANDIDATE_UNIVERSE) --limit $(MVP_CANDIDATE_LIMIT) --start-date $(MVP_START) --end-date $(MVP_END) --cache-dir data/daily --with-adj-factor --with-constraints --index-symbols $(MVP_INDEX_SYMBOLS) --request-interval $(MVP_REQUEST_INTERVAL) --request-retries $(MVP_REQUEST_RETRIES) --retry-backoff $(MVP_RETRY_BACKOFF)
+	PYTHONPATH=$(SRC_PATH) $(PYTHON) -m letsquant.cli data universe --stock-basic data/stocks/stock_basic.csv --output $(MVP_LIQUID_UNIVERSE) --as-of-date $(MVP_END) --min-listed-days 180 --daily-dir data/daily --liquidity-window $(MVP_LIQUIDITY_WINDOW) --min-avg-amount $(MVP_LIQUID_MIN_AVG_AMOUNT) --sort-by avg_amount --limit $(MVP_LIMIT)
+	PYTHONPATH=$(SRC_PATH) $(PYTHON) -m letsquant.cli data adjust --symbols-file $(MVP_LIQUID_UNIVERSE) --limit $(MVP_LIMIT) --daily-dir data/daily --adj-factor-dir data/adj_factor --mode qfq --output-dir data/qfq_daily
+	PYTHONPATH=$(SRC_PATH) $(PYTHON) -m letsquant.cli backtest --config configs/a_share_midterm.json --symbols-file $(MVP_LIQUID_UNIVERSE) --limit $(MVP_LIMIT) --data-dir data/qfq_daily --start-date $(MVP_START) --end-date $(MVP_END) --output-dir $(MVP_LIQUID_OUTPUT)/backtest
+	PYTHONPATH=$(SRC_PATH) $(PYTHON) -m letsquant.cli validate --config configs/a_share_midterm.json --symbols-file $(MVP_LIQUID_UNIVERSE) --limit $(MVP_LIMIT) --data-dir data/qfq_daily --start-date $(MVP_START) --end-date $(MVP_END) --split-date $(MVP_SPLIT) --output-dir $(MVP_LIQUID_OUTPUT)/validation
+	PYTHONPATH=$(SRC_PATH) $(PYTHON) -m letsquant.cli signal --config configs/a_share_midterm.json --symbols-file $(MVP_LIQUID_UNIVERSE) --limit $(MVP_LIMIT) --data-dir data/qfq_daily --start-date $(MVP_START) --end-date $(MVP_END) --output-dir $(MVP_LIQUID_OUTPUT)/signal --portfolio configs/live_portfolio.example.json
 
 real-mvp-fills:
 	PYTHONPATH=$(SRC_PATH) $(PYTHON) -m letsquant.cli fills reconcile --orders $(MVP_OUTPUT)/signal/manual_orders.csv --fills $(MVP_FILLS) --output $(MVP_OUTPUT)/fill_reconciliation.csv

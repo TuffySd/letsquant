@@ -199,6 +199,12 @@ def main() -> None:
     universe_parser.add_argument("--daily-dir", default="data/daily", help="daily CSV directory for liquidity filters")
     universe_parser.add_argument("--liquidity-window", type=int, default=20, help="recent bars used for avg amount")
     universe_parser.add_argument("--min-avg-amount", type=float, help="minimum average amount over liquidity window")
+    universe_parser.add_argument(
+        "--sort-by",
+        choices=["code", "avg_amount"],
+        default="code",
+        help="universe ordering before applying --limit",
+    )
     universe_parser.add_argument("--limit", type=int, help="limit number of selected symbols written to output")
 
     args = parser.parse_args()
@@ -652,6 +658,7 @@ def run_data_universe(args: argparse.Namespace) -> None:
         daily_dir=Path(args.daily_dir),
         liquidity_window=args.liquidity_window,
         min_avg_amount=args.min_avg_amount,
+        sort_by=args.sort_by,
         limit=args.limit,
     )
     result = build_universe_csv(
