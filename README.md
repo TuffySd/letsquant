@@ -54,7 +54,9 @@ PYTHONPATH=src python -m letsquant.cli data sync \
   --with-adj-factor \
   --with-constraints \
   --with-stock-basic \
-  --index-symbols 000300.SH,000905.SH
+  --index-symbols 000300.SH,000905.SH \
+  --request-retries 3 \
+  --retry-backoff 1.0
 ```
 
 也可以用配置文件补齐 `data_dir`、`symbols` 和日期范围：
@@ -151,6 +153,17 @@ make PYTHON=.conda/envs/letsquant/bin/python real-mvp
 - `validation/`：样本内/样本外验证。
 - `signal/`：最新人工交易信号和 `manual_orders.csv`。
 
+扩大到 50 只股票时可以覆盖输出目录，避免覆盖 20 只 MVP 结果：
+
+```bash
+make PYTHON=.conda/envs/letsquant/bin/python real-mvp \
+  MVP_LIMIT=50 \
+  MVP_UNIVERSE=data/universe/mvp50.csv \
+  MVP_OUTPUT=results/real_mvp50
+```
+
+真实接口默认 `MVP_REQUEST_RETRIES=3`、`MVP_RETRY_BACKOFF=1.0`，用于处理偶发 SSL 或代理连接抖动。
+
 交易日后，有真实成交文件时继续跑：
 
 ```bash
@@ -185,6 +198,8 @@ Tushare 扩展缓存目录：
 - `data/qfq_daily/`：前复权日线行情，可作为回测 `data_dir`。
 - `data/hfq_daily/`：后复权日线行情。
 - `data/universe/`：股票池 CSV，支持作为批量同步输入。
+
+`data/limits/*.complete` 和 `data/suspensions/*.complete` 是日级约束缓存完成标记；同一日期范围复跑时会复用已完成缓存，减少重复接口请求。
 
 ## 数据格式
 

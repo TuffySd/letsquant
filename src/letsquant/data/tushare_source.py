@@ -55,6 +55,8 @@ class TushareDailySource:
         cache_dir: Path,
         api_url: Optional[str] = None,
         request_interval: float = 0.0,
+        request_retries: int = 1,
+        retry_backoff: float = 1.0,
         pro_client: Optional[Any] = None,
         sleeper: Any = time.sleep,
     ) -> None:
@@ -62,10 +64,16 @@ class TushareDailySource:
             raise ValueError("Tushare token is required")
         if request_interval < 0:
             raise ValueError("request_interval cannot be negative")
+        if request_retries < 1:
+            raise ValueError("request_retries must be at least 1")
+        if retry_backoff < 0:
+            raise ValueError("retry_backoff cannot be negative")
 
         self.cache_dir = Path(cache_dir)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.request_interval = request_interval
+        self.request_retries = request_retries
+        self.retry_backoff = retry_backoff
         self._sleeper = sleeper
         self._last_request_at: Optional[float] = None
         self.pro = pro_client or self._build_client(token, api_url)
@@ -117,11 +125,16 @@ class TushareDailySource:
         end = end_date.strftime("%Y%m%d")
 
         constraints = ConstraintCache.empty()
+        daily_rows_by_symbol: Optional[Dict[str, List[Dict[str, Any]]]] = None
         if include_constraints:
-            trade_dates = self._collect_daily_trade_dates(symbol_list, start, end)
+            daily_rows_by_symbol = self._fetch_daily_rows_by_symbol(symbol_list, start, end)
+            trade_dates = self._collect_trade_dates_from_rows(daily_rows_by_symbol)
             constraints = self._sync_constraints_csv(trade_dates, set(symbol_list))
 
-        daily = self._sync_daily_rows(symbol_list, start, end, constraints)
+        if daily_rows_by_symbol is not None:
+            daily = self._write_daily_rows(daily_rows_by_symbol, constraints)
+        else:
+            daily = self._sync_daily_rows(symbol_list, start, end, constraints)
         adj_factor = self._sync_adj_factor_csv(symbol_list, start, end) if include_adj_factor else []
         stock_basic = self._sync_stock_basic_csv() if include_stock_basic else None
         index_daily = self._sync_index_daily_csv(index_symbols or [], start, end)
@@ -166,11 +179,16 @@ class TushareDailySource:
         return results
 
     def _call_pro(self, method: str, **params: Any) -> Any:
-        self._wait_for_rate_limit()
-        try:
-            return getattr(self.pro, method)(**params)
-        except Exception as exc:
-            raise RuntimeError(f"Tushare {method} request failed: {exc}") from exc
+        last_error: Optional[Exception] = None
+        for attempt in range(1, self.request_retries + 1):
+            self._wait_for_rate_limit()
+            try:
+                return getattr(self.pro, method)(**params)
+            except Exception as exc:
+                last_error = exc
+                if attempt < self.request_retries and self.retry_backoff > 0:
+                    self._sleeper(self.retry_backoff * attempt)
+        raise RuntimeError(f"Tushare {method} request failed: {last_error}") from last_error
 
     def _sync_daily_rows(
         self,
@@ -194,15 +212,45 @@ class TushareDailySource:
             written.append(path)
         return DailyDownloadResult(written=written, empty_symbols=empty_symbols)
 
-    def _collect_daily_trade_dates(self, symbols: Iterable[str], start: str, end: str) -> List[str]:
-        dates: Set[str] = set()
+    def _fetch_daily_rows_by_symbol(
+        self,
+        symbols: Iterable[str],
+        start: str,
+        end: str,
+    ) -> Dict[str, List[Dict[str, Any]]]:
+        rows_by_symbol: Dict[str, List[Dict[str, Any]]] = {}
         for symbol in symbols:
             rows = self._frame_rows(self._call_pro("daily", ts_code=symbol, start_date=start, end_date=end))
+            rows_by_symbol[symbol] = sorted(rows, key=lambda row: str(row["trade_date"])) if rows else []
+        return rows_by_symbol
+
+    @staticmethod
+    def _collect_trade_dates_from_rows(rows_by_symbol: Dict[str, List[Dict[str, Any]]]) -> List[str]:
+        dates: Set[str] = set()
+        for rows in rows_by_symbol.values():
             for row in rows:
                 value = row.get("trade_date")
                 if value:
                     dates.add(str(value))
         return sorted(dates)
+
+    def _write_daily_rows(
+        self,
+        rows_by_symbol: Dict[str, List[Dict[str, Any]]],
+        constraints: "ConstraintCache",
+    ) -> DailyDownloadResult:
+        written: List[Path] = []
+        empty_symbols: List[str] = []
+        for symbol, rows in rows_by_symbol.items():
+            if not rows:
+                empty_symbols.append(symbol)
+                continue
+            if constraints.has_data:
+                rows = [constraints.enrich_daily_row(row) for row in rows]
+            path = self.cache_dir / f"{symbol}.csv"
+            self._write_rows(path, rows)
+            written.append(path)
+        return DailyDownloadResult(written=written, empty_symbols=empty_symbols)
 
     def _sync_adj_factor_csv(self, symbols: Iterable[str], start: str, end: str) -> List[Path]:
         out_dir = self.cache_dir.parent / "adj_factor"
@@ -226,27 +274,48 @@ class TushareDailySource:
         limit_dir = self.cache_dir.parent / "limits"
         suspension_dir = self.cache_dir.parent / "suspensions"
         for trade_date in trade_dates:
-            day_limit_rows = self._filter_symbol_rows(
-                self._frame_rows(self._call_pro("stk_limit", trade_date=trade_date)),
-                symbols,
+            limit_path = limit_dir / f"{trade_date}.csv"
+            day_limit_rows = self._load_or_fetch_daily_cache(
+                path=limit_path,
+                method="stk_limit",
+                trade_date=trade_date,
+                empty_fieldnames=["ts_code", "trade_date", "up_limit", "down_limit"],
             )
+            day_limit_rows = self._filter_symbol_rows(day_limit_rows, symbols)
             if day_limit_rows:
-                path = limit_dir / f"{trade_date}.csv"
-                self._write_rows(path, sorted(day_limit_rows, key=lambda row: str(row.get("ts_code", ""))))
-                limit_paths.append(path)
+                limit_paths.append(limit_path)
                 limit_rows.extend(day_limit_rows)
 
-            day_suspension_rows = self._filter_symbol_rows(
-                self._frame_rows(self._call_pro("suspend_d", trade_date=trade_date)),
-                symbols,
+            suspension_path = suspension_dir / f"{trade_date}.csv"
+            day_suspension_rows = self._load_or_fetch_daily_cache(
+                path=suspension_path,
+                method="suspend_d",
+                trade_date=trade_date,
+                empty_fieldnames=["ts_code", "trade_date", "suspend_date", "suspend_timing"],
             )
+            day_suspension_rows = self._filter_symbol_rows(day_suspension_rows, symbols)
             if day_suspension_rows:
-                path = suspension_dir / f"{trade_date}.csv"
-                self._write_rows(path, sorted(day_suspension_rows, key=lambda row: str(row.get("ts_code", ""))))
-                suspension_paths.append(path)
+                suspension_paths.append(suspension_path)
                 suspension_rows.extend(day_suspension_rows)
 
         return ConstraintCache.from_rows(limit_rows, suspension_rows, limit_paths, suspension_paths)
+
+    def _load_or_fetch_daily_cache(
+        self,
+        path: Path,
+        method: str,
+        trade_date: str,
+        empty_fieldnames: List[str],
+    ) -> List[Dict[str, Any]]:
+        marker = self._complete_marker_path(path)
+        if path.exists() and marker.exists():
+            return self._read_rows(path)
+
+        rows = self._frame_rows(self._call_pro(method, trade_date=trade_date))
+        rows = sorted(rows, key=lambda row: str(row.get("ts_code", "")))
+        self._write_rows(path, rows, fieldnames=empty_fieldnames)
+        self._write_complete_marker(marker)
+        return rows
 
     def _sync_stock_basic_csv(self) -> Optional[Path]:
         rows = self._frame_rows(
@@ -319,17 +388,32 @@ class TushareDailySource:
         return [row for row in rows if str(row.get("ts_code", "")) in symbols]
 
     @staticmethod
-    def _write_rows(path: Path, rows: List[Dict[str, Any]]) -> None:
+    @staticmethod
+    def _read_rows(path: Path) -> List[Dict[str, Any]]:
+        with path.open("r", encoding="utf-8", newline="") as fh:
+            return [dict(row) for row in csv.DictReader(fh)]
+
+    @staticmethod
+    def _write_rows(path: Path, rows: List[Dict[str, Any]], fieldnames: Optional[List[str]] = None) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
-        fieldnames: List[str] = []
+        resolved_fieldnames: List[str] = list(fieldnames or [])
         for row in rows:
             for key in row:
-                if key not in fieldnames:
-                    fieldnames.append(key)
+                if key not in resolved_fieldnames:
+                    resolved_fieldnames.append(key)
         with path.open("w", encoding="utf-8", newline="") as fh:
-            writer = csv.DictWriter(fh, fieldnames=fieldnames)
+            writer = csv.DictWriter(fh, fieldnames=resolved_fieldnames)
             writer.writeheader()
             writer.writerows(rows)
+
+    @staticmethod
+    def _complete_marker_path(path: Path) -> Path:
+        return path.with_suffix(path.suffix + ".complete")
+
+    @staticmethod
+    def _write_complete_marker(path: Path) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("complete\n", encoding="utf-8")
 
 
 @dataclass(frozen=True)

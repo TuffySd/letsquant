@@ -127,6 +127,18 @@ def main() -> None:
         default=0.5,
         help="seconds between provider requests; 0.5 respects 120 requests/minute",
     )
+    sync_parser.add_argument(
+        "--request-retries",
+        type=int,
+        default=3,
+        help="provider request attempts before failing",
+    )
+    sync_parser.add_argument(
+        "--retry-backoff",
+        type=float,
+        default=1.0,
+        help="base seconds to wait between provider retry attempts",
+    )
     probe_parser = data_subparsers.add_parser("probe", help="probe Tushare token permissions")
     probe_parser.add_argument("--provider", choices=["tushare"], default="tushare")
     probe_parser.add_argument("--symbol", default="000001.SZ", help="sample A-share symbol")
@@ -147,6 +159,18 @@ def main() -> None:
         type=float,
         default=0.5,
         help="seconds between provider requests; 0.5 respects 120 requests/minute",
+    )
+    probe_parser.add_argument(
+        "--request-retries",
+        type=int,
+        default=3,
+        help="provider request attempts before failing",
+    )
+    probe_parser.add_argument(
+        "--retry-backoff",
+        type=float,
+        default=1.0,
+        help="base seconds to wait between provider retry attempts",
     )
     adjust_parser = data_subparsers.add_parser("adjust", help="build adjusted daily CSV from cached data")
     adjust_parser.add_argument("--config", help="optional app config for symbols and data_dir")
@@ -505,6 +529,8 @@ def run_data_sync(args: argparse.Namespace) -> None:
         cache_dir=cache_dir,
         api_url=api_url,
         request_interval=args.request_interval,
+        request_retries=args.request_retries,
+        retry_backoff=args.retry_backoff,
     )
     index_symbols = _split_symbols(args.index_symbols) if args.index_symbols else []
     result = source.sync_market_data_csv(
@@ -558,6 +584,8 @@ def run_data_probe(args: argparse.Namespace) -> None:
         cache_dir=Path("data/daily"),
         api_url=api_url,
         request_interval=args.request_interval,
+        request_retries=args.request_retries,
+        retry_backoff=args.retry_backoff,
     )
     cases = default_probe_cases(args.symbol, trade_date, args.news_source)
     results = source.probe_permissions(cases)

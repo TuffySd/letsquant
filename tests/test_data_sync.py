@@ -121,6 +121,19 @@ class FakeTushareClient:
         raise RuntimeError("permission denied")
 
 
+class FlakyTushareClient(FakeTushareClient):
+    def __init__(self) -> None:
+        super().__init__()
+        self.failures_left = 1
+
+    def daily(self, ts_code: str, start_date: str, end_date: str) -> FakeFrame:
+        if self.failures_left > 0:
+            self.failures_left -= 1
+            self.calls.append({"method": "daily_error"})
+            raise RuntimeError("temporary ssl eof")
+        return super().daily(ts_code, start_date, end_date)
+
+
 class DataSyncTests(unittest.TestCase):
     def test_tushare_source_writes_sorted_daily_csv(self) -> None:
         client = FakeTushareClient()
@@ -164,6 +177,24 @@ class DataSyncTests(unittest.TestCase):
             self.assertEqual(len(client.calls), 2)
             self.assertEqual(len(sleep_calls), 1)
             self.assertGreater(sleep_calls[0], 0)
+
+    def test_tushare_source_retries_transient_request_failure(self) -> None:
+        client = FlakyTushareClient()
+        sleep_calls: List[float] = []
+        with tempfile.TemporaryDirectory() as temp_dir:
+            source = TushareDailySource(
+                token="test-token",
+                cache_dir=Path(temp_dir),
+                request_retries=2,
+                retry_backoff=0.25,
+                pro_client=client,
+                sleeper=sleep_calls.append,
+            )
+            result = source.sync_daily_csv(["000001.SZ"], date(2024, 1, 1), date(2024, 1, 31))
+
+            self.assertEqual(len(result.written), 1)
+            self.assertIn({"method": "daily_error"}, client.calls)
+            self.assertEqual(sleep_calls, [0.25])
 
     def test_permission_probe_reports_success_and_failure(self) -> None:
         client = FakeTushareClient()
@@ -280,6 +311,8 @@ class DataSyncTests(unittest.TestCase):
             self.assertEqual(len(result.suspension), 1)
             self.assertIsNotNone(result.stock_basic)
             self.assertEqual(len(result.index_daily), 1)
+            daily_calls = [call for call in client.calls if "method" not in call and call.get("ts_code") == "000001.SZ"]
+            self.assertEqual(len(daily_calls), 1)
 
             with result.daily.written[0].open("r", encoding="utf-8", newline="") as fh:
                 daily_rows = list(csv.DictReader(fh))
@@ -287,6 +320,39 @@ class DataSyncTests(unittest.TestCase):
             self.assertEqual(daily_rows[0]["limit_down"], "9.0")
             self.assertEqual(daily_rows[0]["is_suspended"], "0")
             self.assertEqual(daily_rows[1]["is_suspended"], "1")
+
+            with (Path(temp_dir) / "limits" / "20240102.csv").open("r", encoding="utf-8", newline="") as fh:
+                limit_rows = list(csv.DictReader(fh))
+            self.assertEqual([row["ts_code"] for row in limit_rows], ["000001.SZ", "000999.SZ"])
+
+    def test_market_data_sync_reuses_complete_constraint_cache(self) -> None:
+        client = FakeTushareClient()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            source = TushareDailySource(
+                token="test-token",
+                cache_dir=Path(temp_dir) / "daily",
+                pro_client=client,
+            )
+            source.sync_market_data_csv(
+                ["000001.SZ"],
+                date(2024, 1, 2),
+                date(2024, 1, 3),
+                include_constraints=True,
+            )
+            client.calls.clear()
+
+            source.sync_market_data_csv(
+                ["000001.SZ"],
+                date(2024, 1, 2),
+                date(2024, 1, 3),
+                include_constraints=True,
+            )
+
+            constraint_calls = [
+                call for call in client.calls if call.get("method") in {"stk_limit", "suspend_d"}
+            ]
+            self.assertEqual(constraint_calls, [])
+            self.assertTrue((Path(temp_dir) / "suspensions" / "20240102.csv.complete").exists())
 
 
 if __name__ == "__main__":
