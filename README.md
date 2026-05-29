@@ -172,7 +172,15 @@ make PYTHON=.conda/envs/letsquant/bin/python real-mvp-liquid \
   MVP_CANDIDATE_LIMIT=150
 ```
 
-该目标会先同步 `MVP_CANDIDATE_LIMIT` 只候选股，再按最近 `MVP_LIQUIDITY_WINDOW=60` 根日线的平均成交额排序，输出 `data/universe/mvp50_liquid.csv`，并跑复权、回测、样本验证和信号生成。输出位于 `results/real_mvp50_liquid/`。
+该目标会先同步 `MVP_CANDIDATE_LIMIT` 只候选股，再按最近 `MVP_LIQUIDITY_WINDOW=60` 根日线的平均成交额排序，并用 `MVP_LIQUID_MIN_AVG_AMOUNT=300000` 作为默认最低流动性门槛。它会输出 `data/universe/mvp50_liquid.csv`，并跑复权、回测、样本验证和信号生成。输出位于 `results/real_mvp50_liquid/`。
+
+如果候选股数据已经同步过，只想重跑阈值、股票池和本地回测，可以用：
+
+```bash
+make PYTHON=.conda/envs/letsquant/bin/python real-mvp-liquid-local \
+  MVP_LIMIT=50 \
+  MVP_LIQUID_MIN_AVG_AMOUNT=300000
+```
 
 交易日后，有真实成交文件时继续跑：
 
