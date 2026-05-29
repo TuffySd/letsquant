@@ -137,6 +137,28 @@ make PYTHON=.conda/envs/letsquant/bin/python real-refresh-stock-basic
 make PYTHON=.conda/envs/letsquant/bin/python real-smoke REAL_LIMIT=20 REAL_START=2023-01-01 REAL_END=2024-12-31
 ```
 
+跑 MVP 主体全链路：
+
+```bash
+export TUSHARE_TOKEN=你的_tushare_token
+export TUSHARE_API_URL=https://tt.xiaodefa.cn  # 仅代理 token 需要
+make PYTHON=.conda/envs/letsquant/bin/python real-mvp
+```
+
+默认会跑 `MVP_LIMIT=20` 只股票，区间为 `MVP_START=2023-01-01` 到 `MVP_END=2024-12-31`，并用 `MVP_SPLIT=2023-12-29` 做样本内/样本外验证。输出位于 `results/real_mvp/`：
+
+- `backtest/`：完整区间回测和基准对比。
+- `validation/`：样本内/样本外验证。
+- `signal/`：最新人工交易信号和 `manual_orders.csv`。
+
+交易日后，有真实成交文件时继续跑：
+
+```bash
+make PYTHON=.conda/envs/letsquant/bin/python real-mvp-fills MVP_FILLS=path/to/fills.csv
+```
+
+该目标会生成成交对账、实际持仓回放和计划 vs 实际跟踪误差。
+
 回测结果默认输出到 `results/`：
 
 - `metrics.json`：收益、回撤、Calmar、夏普、交易次数、胜率、平均持仓天数、换手率、年度收益和月度收益等指标。
