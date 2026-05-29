@@ -11,6 +11,8 @@ REAL_OUTPUT ?= results/real_smoke
 MVP_START ?= 2023-01-01
 MVP_END ?= 2024-12-31
 MVP_SPLIT ?= 2023-12-29
+MVP_LONG_START ?= 2021-01-01
+MVP_LONG_SPLIT ?= 2023-12-29
 MVP_LIMIT ?= 20
 MVP_REQUEST_INTERVAL ?= 0.5
 MVP_REQUEST_RETRIES ?= 3
@@ -19,6 +21,7 @@ MVP_UNIVERSE ?= data/universe/mvp20.csv
 MVP_OUTPUT ?= results/real_mvp
 MVP_LIQUID_UNIVERSE ?= data/universe/mvp50_liquid.csv
 MVP_LIQUID_OUTPUT ?= results/real_mvp50_liquid
+MVP_LIQUID_LONG_OUTPUT ?= results/real_mvp50_liquid_2021_2024
 MVP_CANDIDATE_UNIVERSE ?= data/universe/mvp_candidates.csv
 MVP_CANDIDATE_LIMIT ?= 150
 MVP_LIQUIDITY_WINDOW ?= 60
@@ -27,7 +30,7 @@ MVP_INDEX_SYMBOLS ?= 000300.SH
 MVP_INITIAL_CASH ?= 100000
 MVP_FILLS ?= configs/fills.example.csv
 
-.PHONY: test backtest validate signal compile real-check-env real-refresh-stock-basic real-smoke real-mvp real-mvp-liquid real-mvp-liquid-local real-mvp-fills
+.PHONY: test backtest validate signal compile real-check-env real-refresh-stock-basic real-smoke real-mvp real-mvp-liquid real-mvp-liquid-long real-mvp-liquid-local real-mvp-fills
 
 test:
 	PYTHONPATH=$(SRC_PATH) $(PYTHON) -m unittest discover -s tests
@@ -70,6 +73,11 @@ real-mvp-liquid:
 	PYTHONPATH=$(SRC_PATH) $(PYTHON) -m letsquant.cli data universe --stock-basic data/stocks/stock_basic.csv --output $(MVP_CANDIDATE_UNIVERSE) --as-of-date $(MVP_END) --min-listed-days 180 --limit $(MVP_CANDIDATE_LIMIT)
 	PYTHONPATH=$(SRC_PATH) $(PYTHON) -m letsquant.cli data sync --provider tushare --symbols-file $(MVP_CANDIDATE_UNIVERSE) --limit $(MVP_CANDIDATE_LIMIT) --start-date $(MVP_START) --end-date $(MVP_END) --cache-dir data/daily --with-adj-factor --with-constraints --index-symbols $(MVP_INDEX_SYMBOLS) --request-interval $(MVP_REQUEST_INTERVAL) --request-retries $(MVP_REQUEST_RETRIES) --retry-backoff $(MVP_RETRY_BACKOFF)
 	$(MAKE) PYTHON=$(PYTHON) real-mvp-liquid-local MVP_LIMIT=$(MVP_LIMIT) MVP_LIQUID_UNIVERSE=$(MVP_LIQUID_UNIVERSE) MVP_LIQUID_OUTPUT=$(MVP_LIQUID_OUTPUT) MVP_LIQUIDITY_WINDOW=$(MVP_LIQUIDITY_WINDOW) MVP_LIQUID_MIN_AVG_AMOUNT=$(MVP_LIQUID_MIN_AVG_AMOUNT) MVP_START=$(MVP_START) MVP_END=$(MVP_END) MVP_SPLIT=$(MVP_SPLIT)
+
+real-mvp-liquid-long:
+	PYTHONPATH=$(SRC_PATH) $(PYTHON) -m letsquant.cli data universe --stock-basic data/stocks/stock_basic.csv --output $(MVP_CANDIDATE_UNIVERSE) --as-of-date $(MVP_END) --min-listed-days 180 --limit $(MVP_CANDIDATE_LIMIT)
+	PYTHONPATH=$(SRC_PATH) $(PYTHON) -m letsquant.cli data sync --provider tushare --symbols-file $(MVP_CANDIDATE_UNIVERSE) --limit $(MVP_CANDIDATE_LIMIT) --start-date $(MVP_LONG_START) --end-date $(MVP_END) --cache-dir data/daily --with-adj-factor --with-constraints --index-symbols $(MVP_INDEX_SYMBOLS) --request-interval $(MVP_REQUEST_INTERVAL) --request-retries $(MVP_REQUEST_RETRIES) --retry-backoff $(MVP_RETRY_BACKOFF)
+	$(MAKE) PYTHON=$(PYTHON) real-mvp-liquid-local MVP_LIMIT=$(MVP_LIMIT) MVP_LIQUID_UNIVERSE=$(MVP_LIQUID_UNIVERSE) MVP_LIQUID_OUTPUT=$(MVP_LIQUID_LONG_OUTPUT) MVP_LIQUIDITY_WINDOW=$(MVP_LIQUIDITY_WINDOW) MVP_LIQUID_MIN_AVG_AMOUNT=$(MVP_LIQUID_MIN_AVG_AMOUNT) MVP_START=$(MVP_LONG_START) MVP_END=$(MVP_END) MVP_SPLIT=$(MVP_LONG_SPLIT)
 
 real-mvp-liquid-local:
 	PYTHONPATH=$(SRC_PATH) $(PYTHON) -m letsquant.cli data universe --stock-basic data/stocks/stock_basic.csv --output $(MVP_LIQUID_UNIVERSE) --as-of-date $(MVP_END) --min-listed-days 180 --daily-dir data/daily --liquidity-window $(MVP_LIQUIDITY_WINDOW) --min-avg-amount $(MVP_LIQUID_MIN_AVG_AMOUNT) --sort-by avg_amount --limit $(MVP_LIMIT)

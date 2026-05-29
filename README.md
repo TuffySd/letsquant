@@ -182,6 +182,14 @@ make PYTHON=.conda/envs/letsquant/bin/python real-mvp-liquid-local \
   MVP_LIQUID_MIN_AVG_AMOUNT=300000
 ```
 
+跑 2021-2024 长历史验证：
+
+```bash
+make PYTHON=.conda/envs/letsquant/bin/python real-mvp-liquid-long MVP_LIMIT=50
+```
+
+该目标使用 `MVP_LONG_START=2021-01-01`、`MVP_END=2024-12-31`，输出位于 `results/real_mvp50_liquid_2021_2024/`。
+
 交易日后，有真实成交文件时继续跑：
 
 ```bash
